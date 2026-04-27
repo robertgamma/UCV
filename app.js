@@ -5,6 +5,39 @@
  * Authors : Alex & Antigravity AI
  */
 const APP_VERSION = '10.0.4';
+
+/* ===================== API OFFLINE NATIVE (HOISTED) ===================== */
+const API = {
+    async get_pensum(key) {
+        const db = loadDB();
+        const pBase = JSON.parse(JSON.stringify(PENSUMS_DB[key] || {}));
+        if(!pBase.pensum) return { pensum: [], NOMBRE: 'Error' };
+        
+        const prog = db.progreso[key] || {};
+        pBase.pensum.forEach(m => {
+            if(prog[m.id]) { m.estado = prog[m.id].estado; m.nota = prog[m.id].nota; m.periodo = prog[m.id].periodo; }
+            else { m.estado = 'Sin Cursar'; m.nota = null; m.periodo = ''; }
+        });
+        pBase.kardex_history = db.kardex_history?.[key] || [];
+        return pBase;
+    },
+    async save_progreso(career, id, estado, nota, periodo) {
+        const db = loadDB();
+        if(!db.progreso[career]) db.progreso[career] = {};
+        db.progreso[career][id] = { estado, nota, periodo };
+        if(!db.kardex_history) db.kardex_history = {};
+        if(!db.kardex_history[career]) db.kardex_history[career] = [];
+        db.kardex_history[career] = db.kardex_history[career].filter(x => x.materia_id !== id || x.periodo !== periodo);
+        db.kardex_history[career].push({ materia_id: id, estado, nota, periodo });
+        saveDB(db);
+    },
+    async save_evento(e) { const db = loadDB(); db.eventos.push({...e, id: Date.now()}); saveDB(db); },
+    async get_eventos() { return loadDB().eventos || []; },
+    async save_horario(h) { const db = loadDB(); db.horarios.push({...h, id: Date.now()}); saveDB(db); },
+    async get_horarios() { return loadDB().horarios || []; },
+    async delete_horario(id) { const db = loadDB(); db.horarios = db.horarios.filter(x => x.id !== id); saveDB(db); }
+};
+
 const appState = { 
     currentCareer:null, 
     pensumData:null, 
@@ -21,22 +54,37 @@ const appState = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(err => console.error("SW fallback", err));
-    }
+    console.log("App Initializing...");
+    try {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').catch(err => console.error("SW fallback", err));
+        }
 
-    const db = loadDB();
-    if (db.currentCareer) {
-        await selectCareer(db.currentCareer);
-    } else {
-        document.getElementById('onboarding-screen').classList.remove('hidden');
-        renderOnboarding();
+        const db = loadDB();
+        if (db.currentCareer && PENSUMS_DB[db.currentCareer]) {
+            console.log("Loading career:", db.currentCareer);
+            await selectCareer(db.currentCareer);
+        } else {
+            console.log("Showing onboarding...");
+            const ob = document.getElementById('onboarding-screen');
+            if(ob) {
+                ob.classList.remove('hidden');
+                renderOnboarding();
+            } else {
+                console.error("Onboarding element not found");
+            }
+        }
+    } catch(err) {
+        console.error("Initialization failed:", err);
+        alert("Error al iniciar: " + err.message);
     }
 });
 
 function renderOnboarding() { 
     const carreras = PENSUMS_DB;
-    document.getElementById('ob-career-grid').innerHTML = Object.keys(carreras).map(k => `
+    const grid = document.getElementById('ob-career-grid');
+    if(!grid) return;
+    grid.innerHTML = Object.keys(carreras).map(k => `
         <div class="glass-card p-6 text-center group cursor-pointer" onclick="saveCareerChoice('${k}')">
             <div class="w-12 h-12 bg-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-500/40 transition-all">
                 <i class="fas fa-university text-blue-400"></i>
@@ -50,15 +98,22 @@ async function saveCareerChoice(key) {
     const db = loadDB();
     db.currentCareer = key;
     saveDB(db);
-    document.getElementById('onboarding-screen').classList.add('hidden'); 
+    const ob = document.getElementById('onboarding-screen');
+    if(ob) ob.classList.add('hidden'); 
     await selectCareer(key); 
 }
 
 async function selectCareer(key) { 
+    console.log("Selecting career:", key);
     appState.currentCareer = key; 
     appState.pensumData = await API.get_pensum(key);
-    document.getElementById('career-badge').textContent = appState.pensumData.NOMBRE; 
-    document.getElementById('main-app').classList.remove('hidden');
+    
+    const badge = document.getElementById('career-badge');
+    const mainApp = document.getElementById('main-app');
+    
+    if(badge) badge.textContent = appState.pensumData.NOMBRE; 
+    if(mainApp) mainApp.classList.remove('hidden');
+    
     actualizarVista(); 
     changeView(appState.currentView); 
     poblarSelectsMaterias();
@@ -266,9 +321,13 @@ function renderKardex() {
     const promedioEgreso = uc_insc > 0 ? (sum_pxu / uc_insc) : 0;
     const indiceAcademico = uc_insc > 0 ? (uc_apr / uc_insc) : 0;
 
-    document.getElementById('kx-promedio-gral').textContent = promedioEgreso.toFixed(3);
-    document.getElementById('kx-eficiencia').textContent = indiceAcademico.toFixed(3);
-    document.getElementById('kx-uc-cursadas').textContent = uc_insc;
+    const prEl = document.getElementById('kx-promedio-gral');
+    const efEl = document.getElementById('kx-eficiencia');
+    const ucEl = document.getElementById('kx-uc-cursadas');
+
+    if(prEl) prEl.textContent = promedioEgreso.toFixed(3);
+    if(efEl) efEl.textContent = indiceAcademico.toFixed(3);
+    if(ucEl) ucEl.textContent = uc_insc;
 
     let html = '';
     const periods = Object.keys(pPer).sort().reverse();
@@ -291,7 +350,8 @@ function renderKardex() {
                 </div>
             </div>`;
     });
-    document.getElementById('kardex-table').innerHTML = html || '<p class="col-span-full text-center py-10 text-slate-500">No hay datos de kárdex.</p>';
+    const kt = document.getElementById('kardex-table');
+    if(kt) kt.innerHTML = html || '<p class="col-span-full text-center py-10 text-slate-500">No hay datos de kárdex.</p>';
     renderKardexChart(pPer);
 }
 
@@ -316,7 +376,7 @@ function renderKardexChart(pPer) {
 async function parsePDF(type, mode) {
     const fileInput = document.getElementById(`${type}-file`);
     const statusEl = document.getElementById(`${type}-parse-status`);
-    if(!fileInput.files[0]) return alert("Sube un archivo");
+    if(!fileInput || !fileInput.files[0]) return alert("Sube un archivo");
     statusEl.innerHTML = '<div class="flex items-center gap-2 text-blue-400 font-bold animate-pulse"><i class="fas fa-spinner fa-spin"></i> Procesando...</div>';
     try {
         const results = await parsePDFMultiMode(fileInput.files[0], type, mode, {}, (msg, cls) => { statusEl.innerHTML = `<div class="${cls}">${msg}</div>`; });
@@ -362,16 +422,21 @@ async function guardarMateria() {
 }
 
 function actualizarVista() { 
+    if(!appState.pensumData) return;
     const p = appState.pensumData.pensum, cAp = p.filter(m=>m.estado==='Aprobada').reduce((a,m)=>a+m.creditos,0);
-    document.getElementById('creditos-aprobados').textContent = cAp; 
+    const crEl = document.getElementById('creditos-aprobados');
+    if(crEl) crEl.textContent = cAp; 
     const prog = (cAp / appState.pensumData.TOTAL_CREDITOS_CARRERA)*100; 
-    document.getElementById('progressBar').style.width = `${prog}%`; 
-    document.getElementById('progress-percent').textContent = `${prog.toFixed(1)}%`;
+    const pb = document.getElementById('progressBar');
+    const pp = document.getElementById('progress-percent');
+    if(pb) pb.style.width = `${prog}%`; 
+    if(pp) pp.textContent = `${prog.toFixed(1)}%`;
     const curSet = new Set(p.filter(m=>m.estado==='Aprobada').map(m=>m.codigo));
     const disp = p.filter(m => m.estado==='Sin Cursar' && checkDisponibilidad(m, cAp, curSet)==='disponible');
     disp.forEach(d => { d.peso = calculateUnlockWeight(d.codigo, p); }); 
     disp.sort((a,b)=>b.peso - a.peso);
-    document.getElementById('materias-disponibles-lista').innerHTML = disp.map(m=>`
+    const dl = document.getElementById('materias-disponibles-lista');
+    if(dl) dl.innerHTML = disp.map(m=>`
         <div class="p-4 glass-card border-none bg-white/5 hover:bg-white/10 flex justify-between items-center cursor-pointer transition-all" onclick="openMateriaModal(${m.id})">
             <div><p class="font-bold text-slate-200 text-sm">${m.nombre}</p><span class="text-xs text-slate-500 font-mono">${m.creditos} UC</span></div>
             ${m.peso > 0 ? `<span class="bg-blue-500/20 text-blue-400 text-[10px] font-black px-2 py-1 rounded-lg border border-blue-500/30">Abre ${m.peso}</span>` : ''}
@@ -423,7 +488,8 @@ function renderCalendario() {
     const grid = document.getElementById('calendario-grid');
     if(!grid) return;
     const y = appState.currentDate.getFullYear(), m = appState.currentDate.getMonth();
-    document.getElementById('mes-anio-display').textContent = new Intl.DateTimeFormat('es-ES', {month:'long', year:'numeric'}).format(appState.currentDate);
+    const md = document.getElementById('mes-anio-display');
+    if(md) md.textContent = new Intl.DateTimeFormat('es-ES', {month:'long', year:'numeric'}).format(appState.currentDate);
     grid.innerHTML = '';
     for(let i=0; i<new Date(y,m,1).getDay(); i++) grid.innerHTML += '<div class="h-20 bg-slate-900/50"></div>';
     for(let d=1; d<=new Date(y,m+1,0).getDate(); d++) {
@@ -441,44 +507,18 @@ function renderCalendario() {
 
 function poblarSelectsMaterias() {
     const sel = document.getElementById('horario-materia-select');
-    if(!sel) return;
+    if(!sel || !appState.pensumData) return;
     const enCurso = appState.pensumData.pensum.filter(m => m.estado === 'En Curso');
     sel.innerHTML = enCurso.map(m => `<option value="${m.nombre}">${m.nombre}</option>`).join('') + '<option value="MANUAL">-- Otro --</option>';
 }
 
-/* ===================== API OFFLINE NATIVE ===================== */
-const API = {
-    async get_pensum(key) {
-        const db = loadDB();
-        const pBase = JSON.parse(JSON.stringify(PENSUMS_DB[key]));
-        const prog = db.progreso[key] || {};
-        pBase.pensum.forEach(m => {
-            if(prog[m.id]) { m.estado = prog[m.id].estado; m.nota = prog[m.id].nota; m.periodo = prog[m.id].periodo; }
-            else { m.estado = 'Sin Cursar'; m.nota = null; m.periodo = ''; }
-        });
-        const kardexRaw = db.kardex_history?.[key] || [];
-        pBase.kardex_history = kardexRaw;
-        return pBase;
-    },
-    async save_progreso(career, id, estado, nota, periodo) {
-        const db = loadDB();
-        if(!db.progreso[career]) db.progreso[career] = {};
-        db.progreso[career][id] = { estado, nota, periodo };
-        // Sync to kardex history for stats
-        if(!db.kardex_history[career]) db.kardex_history[career] = [];
-        db.kardex_history[career] = db.kardex_history[career].filter(x => x.materia_id !== id || x.periodo !== periodo);
-        db.kardex_history[career].push({ materia_id: id, estado, nota, periodo });
-        saveDB(db);
-    },
-    async save_evento(e) { const db = loadDB(); db.eventos.push({...e, id: Date.now()}); saveDB(db); },
-    async get_eventos() { return loadDB().eventos || []; },
-    async save_horario(h) { const db = loadDB(); db.horarios.push({...h, id: Date.now()}); saveDB(db); },
-    async get_horarios() { return loadDB().horarios || []; },
-    async delete_horario(id) { const db = loadDB(); db.horarios = db.horarios.filter(x => x.id !== id); saveDB(db); }
-};
-
 function loadDB() {
-    const data = localStorage.getItem('ucv_db_native');
-    return data ? JSON.parse(data) : { currentCareer: null, progreso: {}, eventos: [], horarios: [], kardex_history: {} };
+    try {
+        const data = localStorage.getItem('ucv_db_native');
+        return data ? JSON.parse(data) : { currentCareer: null, progreso: {}, eventos: [], horarios: [], kardex_history: {} };
+    } catch(e) {
+        console.error("DB Load error", e);
+        return { currentCareer: null, progreso: {}, eventos: [], horarios: [], kardex_history: {} };
+    }
 }
 function saveDB(db) { localStorage.setItem('ucv_db_native', JSON.stringify(db)); }
