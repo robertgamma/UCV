@@ -139,13 +139,24 @@ async function parsePDF(type) {
             promptText = `Extrae la programacion semanal de este documento universitario. Para cada semana identifica: numero de semana, fecha de inicio en formato YYYY-MM-DD (o null si no hay), nombre de la materia o asignatura, y el tema o actividad planificada. Retorna SOLO un array JSON valido: [{"numero":1, "fecha":"2024-03-15", "materia":"Calculo I", "tema":"Limites y continuidad"}]. Texto:\n${text.substring(0, 45000)}`;
         }
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }], generationConfig: { temperature: 0.1 } })
-        });
+        // Call Gemini with retry on overload
+        let data, attempts = 0;
+        const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+        while (attempts < 3) {
+            const model = MODELS[attempts % MODELS.length];
+            showStatus(`🤖 Enviando a Gemini (${model})...`, 'text-purple-600 animate-pulse');
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }], generationConfig: { temperature: 0.1 } })
+            });
+            data = await res.json();
+            if (!data.error || !data.error.message.toLowerCase().includes('503') && !data.error.message.toLowerCase().includes('overload') && !data.error.message.toLowerCase().includes('spike')) break;
+            attempts++;
+            showStatus(`⚠️ Gemini saturado, reintentando con modelo alternativo (${attempts}/3)...`, 'text-yellow-600');
+            await new Promise(r => setTimeout(r, 2000 * attempts));
+        }
 
-        const data = await res.json();
         if (data.error) throw new Error('Gemini: ' + data.error.message);
         if (!data.candidates || !data.candidates[0]) throw new Error('Gemini no devolvio respuesta.');
 
