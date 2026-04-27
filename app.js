@@ -1,3 +1,15 @@
+/**
+ * UCV Planner — Planificador Académico Offline
+ * Versión : 10.0.0
+ * Fecha   : 2026-04-27
+ * Historial:
+ *   v10.0.0 — Parser multi-modo (Regex UCV / Cloudmersive / Gemini)
+ *             Programación Semanal, Evaluaciones ↔ Calendario
+ *             Nota con redondeo entero, Calendario como pantalla principal
+ *   v9.0.0  — PWA Offline completa, LocalStorage, Service Worker
+ *   v8.x    — Versión servidor Flask/Python (reemplazada)
+ */
+const APP_VERSION = '10.0.0';
 const appState = { user:null, currentCareer:null, pensumData:null, currentView:'list', optimalPlan:null, horarios:[], eventos:[], evaluaciones:[], semanas:[], currentDate:new Date(), selectedDateStr:null, kardexChartInstance:null, seccionSeleccionada:null };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -92,81 +104,39 @@ function switchTab(tab) {
     if(tab==='pd') document.getElementById('pd-codigo').focus(); 
 }
 
-async function parsePDF(type) {
-    const fileInputId = type === 'semanas' ? 'semanas-file' : (type + '-file');
-    const fileInput = document.getElementById(fileInputId);
-    const statusEl = document.getElementById(type + '-parse-status');
-    const btnEl = document.getElementById('btn-parse-' + type);
+async function parsePDF(type, mode) {
+    mode = mode || document.getElementById(`parse-mode-${type}`)?.value || 'regex';
+    const fileInputId = (type === 'semanas') ? 'semanas-file' : `${type}-file`;
+    const fileInput  = document.getElementById(fileInputId);
+    const statusEl   = document.getElementById(`${type}-parse-status`);
+    const btns       = document.querySelectorAll(`.btn-parse-${type}`);
 
-    const showStatus = (msg, color) => { if(statusEl) { statusEl.textContent = msg; statusEl.className = `text-xs font-bold text-center mt-2 ${color}`; } };
+    const showStatus = (msg, cls) => {
+        if (statusEl) { statusEl.textContent = msg; statusEl.className = `text-xs font-bold mt-2 ${cls}`; }
+    };
 
-    if (!fileInput || !fileInput.files[0]) { showStatus('⚠️ Sube un archivo PDF primero.', 'text-red-600'); return; }
-
+    if (!fileInput?.files[0]) { showStatus('⚠️ Sube un archivo PDF primero.', 'text-red-600'); return; }
     const db = loadDB();
-    if (!db.currentUser) { showStatus('❌ No hay sesión activa.', 'text-red-600'); return; }
-    let apiKey = db.users[db.currentUser].geminiApiKey;
-    if (!apiKey) {
-        apiKey = prompt('Para usar la IA necesitas tu Google Gemini API Key:');
-        if (apiKey) await API.set_api_key(apiKey);
-        else { showStatus('❌ API Key requerida.', 'text-red-600'); return; }
+    if (!db.currentUser) { showStatus('❌ Sin sesión.', 'text-red-600'); return; }
+    const u = db.users[db.currentUser];
+
+    // Gather API keys
+    const keys = { gemini: u.geminiApiKey, cloudmersive: u.cloudmersiveKey };
+
+    // If mode needs a key and it's missing, prompt
+    if (mode === 'gemini' && !keys.gemini) {
+        const k = prompt('Ingresa tu API Key de Gemini (google.ai/studio):');
+        if (k) { keys.gemini = k; await API.set_api_key(k); } else return;
+    }
+    if (mode === 'cloudmersive' && !keys.cloudmersive) {
+        const k = prompt('Ingresa tu API Key de Cloudmersive (cloudmersive.com — gratis):');
+        if (k) { keys.cloudmersive = k; u.cloudmersiveKey = k; const d = loadDB(); d.users[d.currentUser].cloudmersiveKey = k; saveDB(d); } else return;
     }
 
-    showStatus('📄 Extrayendo texto del PDF...', 'text-purple-600 animate-pulse');
-    if (btnEl) btnEl.disabled = true;
+    btns.forEach(b => b.disabled = true);
 
     try {
-        // Extract text from PDF
-        const ab = await fileInput.files[0].arrayBuffer();
-        const pdf = await pdfjsLib.getDocument(ab).promise;
-        let text = '';
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            text += content.items.map(item => item.str).join(' ') + '\n';
-        }
-        if (!text.trim()) throw new Error('El PDF no tiene texto extraíble (puede ser imagen). Prueba con otro archivo.');
-
-        showStatus('🤖 Enviando a Gemini...', 'text-purple-600 animate-pulse');
-
-        let promptText = '';
-        if (type === 'kardex') {
-            promptText = `Analiza este Kardex universitario y extrae las materias. Retorna SOLO un array JSON valido, sin explicaciones: [{"codigo":"0251", "estado":"Aprobada", "nota":15, "periodo":"2023-1"}]. Estados validos: Aprobada, Reprobada, En Curso, Retirada. Texto del PDF:\n${text.substring(0, 15000)}`;
-        } else if (type === 'horario') {
-            promptText = `Extrae la Oferta Docente (secciones) de este PDF universitario. Retorna SOLO un array JSON valido: [{"codigo":"0251", "seccion":"001", "dias":["Lunes","Miercoles"], "hora_inicio":"07:00", "hora_fin":"08:30", "aula":"AU-101", "profesor":"Perez"}]. Texto:\n${text.substring(0, 45000)}`;
-        } else if (type === 'calendario') {
-            promptText = `Extrae todos los eventos y fechas importantes de este calendario universitario. Retorna SOLO un array JSON valido (no objeto, sino array directo): [{"titulo":"Inicio de Clases", "fecha":"2024-03-15", "color":"#f59e0b"}]. La fecha debe ser formato YYYY-MM-DD. Si no tienes fecha exacta omite el evento. Texto:\n${text.substring(0, 15000)}`;
-        } else if (type === 'semanas') {
-            promptText = `Extrae la programacion semanal de este documento universitario. Para cada semana identifica: numero de semana, fecha de inicio en formato YYYY-MM-DD (o null si no hay), nombre de la materia o asignatura, y el tema o actividad planificada. Retorna SOLO un array JSON valido: [{"numero":1, "fecha":"2024-03-15", "materia":"Calculo I", "tema":"Limites y continuidad"}]. Texto:\n${text.substring(0, 45000)}`;
-        }
-
-        // Call Gemini with retry on overload
-        let data, attempts = 0;
-        const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-        while (attempts < 3) {
-            const model = MODELS[attempts % MODELS.length];
-            showStatus(`🤖 Enviando a Gemini (${model})...`, 'text-purple-600 animate-pulse');
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }], generationConfig: { temperature: 0.1 } })
-            });
-            data = await res.json();
-            if (!data.error || !data.error.message.toLowerCase().includes('503') && !data.error.message.toLowerCase().includes('overload') && !data.error.message.toLowerCase().includes('spike')) break;
-            attempts++;
-            showStatus(`⚠️ Gemini saturado, reintentando con modelo alternativo (${attempts}/3)...`, 'text-yellow-600');
-            await new Promise(r => setTimeout(r, 2000 * attempts));
-        }
-
-        if (data.error) throw new Error('Gemini: ' + data.error.message);
-        if (!data.candidates || !data.candidates[0]) throw new Error('Gemini no devolvio respuesta.');
-
-        let responseText = data.candidates[0].content.parts[0].text;
-        // Strip markdown code fences
-        responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        // Extract first JSON structure
-        const jsonMatch = responseText.match(/(\[.*\]|\{.*\})/s);
-        if (!jsonMatch) throw new Error('La IA no devolvio JSON valido. Respuesta: ' + responseText.substring(0, 100));
-        const parsedData = JSON.parse(jsonMatch[0]);
+        const parsedData = await parsePDFMultiMode(fileInput.files[0], type, mode, keys, showStatus);
 
         if (type === 'kardex') {
             let count = 0;
@@ -187,25 +157,23 @@ async function parsePDF(type) {
             for (let ev of items) {
                 if (ev.fecha && ev.titulo) await API.save_evento({ fecha: ev.fecha, titulo: ev.titulo, color: ev.color || '#f59e0b' });
             }
-            await loadEventos();
-            renderCalendario();
+            await loadEventos(); renderCalendario();
             showStatus(`✅ ${items.length} eventos importados`, 'text-green-600');
 
         } else if (type === 'semanas') {
             const items = Array.isArray(parsedData) ? parsedData : [];
             await API.save_semanas_bulk(appState.currentCareer, items);
-            await loadEventos();
-            renderCalendario();
-            await loadSemanas();
+            await loadEventos(); renderCalendario(); await loadSemanas();
             showStatus(`✅ ${items.length} semanas importadas`, 'text-green-600');
         }
 
-    } catch (e) {
-        showStatus('❌ Error: ' + e.message, 'text-red-600');
+    } catch(e) {
+        showStatus('❌ ' + e.message, 'text-red-600');
         console.error('parsePDF error:', e);
     }
-    if (btnEl) btnEl.disabled = false;
+    btns.forEach(b => b.disabled = false);
 }
+
 
 
 function checkDisponibilidad(materia, creditosAprobados, materiasAprobadasCodigos) { 
