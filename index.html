@@ -6,34 +6,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
 </head>
 <body class="flex flex-col min-h-screen">
-<!-- AUTH SCREEN -->
-<div id="auth-screen" class="flex-grow flex items-center justify-center p-4">
-    <div class="glass-card p-8 w-full max-w-md">
-        <h1 class="text-4xl font-black text-center mb-6 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            <i class="fas fa-graduation-cap"></i> UCV Planner
-        </h1>
-        <div id="auth-error" class="hidden mb-4 p-3 bg-red-500/20 text-red-300 border border-red-500/50 rounded-lg text-sm font-bold text-center"></div>
-        <div class="space-y-5">
-            <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Usuario</label>
-                <input type="text" id="auth-user" class="w-full p-4 bg-slate-800/50 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="usuario_ucv">
-            </div>
-            <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Clave</label>
-                <input type="password" id="auth-pass" class="w-full p-4 bg-slate-800/50 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="••••••••">
-            </div>
-            <div class="flex gap-4 pt-4">
-                <button onclick="auth('login')" class="w-1/2 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-95">
-                    <i class="fas fa-sign-in-alt"></i> Entrar
-                </button>
-                <button onclick="auth('register')" class="w-1/2 bg-slate-800 hover:bg-slate-700 text-white font-black py-4 rounded-xl border border-slate-600 transition-all active:scale-95">
-                    <i class="fas fa-user-plus"></i> Registro
-                </button>
-            </div>
-            <p class="text-center text-sm font-medium text-slate-500 mt-4 cursor-pointer hover:underline" onclick="alert('Para recuperar tu clave, contacta a Robert.')"><i class="fas fa-key"></i> ¿Olvidaste tu contraseña?</p>
-        </div>
-    </div>
-</div>
 
 <!-- ONBOARDING -->
 <div id="onboarding-screen" class="hidden flex-grow flex items-center justify-center p-4">
@@ -49,14 +21,14 @@
     <div id="planner-screen" class="w-full max-w-7xl mx-auto">
         <header class="mb-8 flex flex-col md:flex-row justify-between items-end gap-4">
             <div>
-                <h1 class="text-4xl font-black mb-1">Panel Estudiantil</h1>
-                <p class="text-blue-400 font-bold text-lg" id="user-greeting"></p>
+                <h1 class="text-4xl font-black mb-1">UCV Academic Master</h1>
+                <p class="text-blue-400 font-bold text-lg">Tu Planificador Académico</p>
             </div>
             <div class="flex gap-3 flex-wrap">
                 <span id="career-badge" class="px-4 py-2 glass-card text-blue-400 font-bold border-blue-500/30"></span>
                 <a id="btn-descargar-pensum" href="#" target="_blank" class="px-4 py-2 glass-card text-slate-300 font-bold border-slate-700 hover:bg-slate-800 transition-all"><i class="fas fa-file-pdf"></i> Pénsum</a>
-                <button onclick="logout()" class="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold rounded-xl border border-red-500/30 transition-all">
-                    <i class="fas fa-sign-out-alt"></i>
+                <button onclick="localStorage.clear(); window.location.reload();" class="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold rounded-xl border border-red-500/30 transition-all">
+                    <i class="fas fa-trash"></i> Reiniciar
                 </button>
             </div>
         </header>
@@ -221,13 +193,13 @@
 
 <footer class="premium-footer mt-auto">
     <div class="footer-left">
-        Mi forma by Alex 2
+        By Alex
     </div>
     <div class="footer-center">
-        La dedicatoria TA SARM <span class="pulse-heart">❤️</span>
+        v10.0.4
     </div>
     <div class="footer-right">
-        versión actual: v10.0.0
+        TA S.A.R.M <span class="pulse-heart">❤️</span>
     </div>
 </footer>
 

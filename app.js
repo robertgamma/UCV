@@ -1,12 +1,11 @@
 /**
  * UCV Planner — Premium Edition
- * Versión : 10.0.1 (Premium Fix)
+ * Versión : 10.0.4 (Offline Native)
  * Design  : Glassmorphism / Indigo Theme
- * Authors : Alex 2 & Antigravity AI
+ * Authors : Alex & Antigravity AI
  */
-const APP_VERSION = '10.0.1';
+const APP_VERSION = '10.0.4';
 const appState = { 
-    user:null, 
     currentCareer:null, 
     pensumData:null, 
     currentView:'list', 
@@ -26,21 +25,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       navigator.serviceWorker.register('./sw.js').catch(err => console.error("SW fallback", err));
     }
 
-    const data = await API.me();
-    if(data.logged_in) {
-        appState.user = data.username; 
-        document.getElementById('user-greeting').textContent = '¡Hola, ' + data.username + '!';
-        document.getElementById('auth-screen').classList.add('hidden');
-        if (data.carrera_id) {
-            await selectCareer(data.carrera_id); 
-        } else { 
-            document.getElementById('onboarding-screen').classList.remove('hidden'); 
-            await renderOnboarding(); 
-        }
+    const db = loadDB();
+    if (db.currentCareer) {
+        await selectCareer(db.currentCareer);
+    } else {
+        document.getElementById('onboarding-screen').classList.remove('hidden');
+        renderOnboarding();
     }
 });
 
-async function renderOnboarding() { 
+function renderOnboarding() { 
     const carreras = PENSUMS_DB;
     document.getElementById('ob-career-grid').innerHTML = Object.keys(carreras).map(k => `
         <div class="glass-card p-6 text-center group cursor-pointer" onclick="saveCareerChoice('${k}')">
@@ -53,7 +47,9 @@ async function renderOnboarding() {
 }
 
 async function saveCareerChoice(key) { 
-    await API.set_carrera(key);
+    const db = loadDB();
+    db.currentCareer = key;
+    saveDB(db);
     document.getElementById('onboarding-screen').classList.add('hidden'); 
     await selectCareer(key); 
 }
@@ -274,7 +270,6 @@ function renderKardex() {
     document.getElementById('kx-eficiencia').textContent = indiceAcademico.toFixed(3);
     document.getElementById('kx-uc-cursadas').textContent = uc_insc;
 
-    // Render Table
     let html = '';
     const periods = Object.keys(pPer).sort().reverse();
     periods.forEach(p => {
@@ -297,7 +292,6 @@ function renderKardex() {
             </div>`;
     });
     document.getElementById('kardex-table').innerHTML = html || '<p class="col-span-full text-center py-10 text-slate-500">No hay datos de kárdex.</p>';
-
     renderKardexChart(pPer);
 }
 
@@ -305,32 +299,15 @@ function renderKardexChart(pPer) {
     const ctx = document.getElementById('kardexChart');
     if(!ctx) return;
     if(appState.kardexChartInstance) appState.kardexChartInstance.destroy();
-
     const labels = Object.keys(pPer).sort();
     const dataProm = labels.map(p => (pPer[p].pts_sem / pPer[p].uc_sem).toFixed(2));
-    
     appState.kardexChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
-            datasets: [{
-                label: 'Promedio Semestral',
-                data: dataProm,
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                fill: true,
-                tension: 0.4
-            }]
+            datasets: [{ label: 'Promedio Semestral', data: dataProm, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4 }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { min: 0, max: 20, grid: { color: 'rgba(255,255,255,0.05)' } },
-                x: { grid: { display: false } }
-            },
-            plugins: { legend: { display: false } }
-        }
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 20, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }, plugins: { legend: { display: false } } }
     });
 }
 
@@ -340,18 +317,9 @@ async function parsePDF(type, mode) {
     const fileInput = document.getElementById(`${type}-file`);
     const statusEl = document.getElementById(`${type}-parse-status`);
     if(!fileInput.files[0]) return alert("Sube un archivo");
-
     statusEl.innerHTML = '<div class="flex items-center gap-2 text-blue-400 font-bold animate-pulse"><i class="fas fa-spinner fa-spin"></i> Procesando...</div>';
-    
     try {
-        const db = loadDB();
-        const user = db.users[db.currentUser];
-        const keys = { gemini: user.geminiApiKey };
-        
-        const results = await parsePDFMultiMode(fileInput.files[0], type, mode, keys, (msg, cls) => {
-            statusEl.innerHTML = `<div class="${cls}">${msg}</div>`;
-        });
-
+        const results = await parsePDFMultiMode(fileInput.files[0], type, mode, {}, (msg, cls) => { statusEl.innerHTML = `<div class="${cls}">${msg}</div>`; });
         if(type === 'kardex') {
             for(let m of results) {
                 const mat = appState.pensumData.pensum.find(x => x.codigo === m.codigo);
@@ -366,9 +334,7 @@ async function parsePDF(type, mode) {
             await loadEventos(); renderCalendario();
             statusEl.innerHTML = `<div class="text-emerald-400 font-bold">✅ ${results.length} eventos importados</div>`;
         }
-    } catch(e) {
-        statusEl.innerHTML = `<div class="text-red-400 font-bold">❌ Error: ${e.message}</div>`;
-    }
+    } catch(e) { statusEl.innerHTML = `<div class="text-red-400 font-bold">❌ Error: ${e.message}</div>`; }
 }
 
 function openMateriaModal(id) { 
@@ -388,13 +354,11 @@ async function guardarMateria() {
     const est = document.getElementById('modal-mat-estado').value; 
     const nota = document.getElementById('modal-mat-nota').value;
     const per = document.getElementById('modal-mat-periodo').value;
-    
     await API.save_progreso(appState.currentCareer, id, est, nota ? parseInt(nota) : null, per);
     document.getElementById('materia-modal').classList.add('hidden'); 
     appState.pensumData = await API.get_pensum(appState.currentCareer);
     actualizarVista(); 
-    if(appState.currentView === 'list') renderizarSemestres(); 
-    else if(appState.currentView === 'visual') renderizarPensumVisual(); 
+    if(appState.currentView === 'list') renderizarSemestres(); else if(appState.currentView === 'visual') renderizarPensumVisual(); 
 }
 
 function actualizarVista() { 
@@ -403,18 +367,15 @@ function actualizarVista() {
     const prog = (cAp / appState.pensumData.TOTAL_CREDITOS_CARRERA)*100; 
     document.getElementById('progressBar').style.width = `${prog}%`; 
     document.getElementById('progress-percent').textContent = `${prog.toFixed(1)}%`;
-
     const curSet = new Set(p.filter(m=>m.estado==='Aprobada').map(m=>m.codigo));
     const disp = p.filter(m => m.estado==='Sin Cursar' && checkDisponibilidad(m, cAp, curSet)==='disponible');
     disp.forEach(d => { d.peso = calculateUnlockWeight(d.codigo, p); }); 
     disp.sort((a,b)=>b.peso - a.peso);
-    
     document.getElementById('materias-disponibles-lista').innerHTML = disp.map(m=>`
         <div class="p-4 glass-card border-none bg-white/5 hover:bg-white/10 flex justify-between items-center cursor-pointer transition-all" onclick="openMateriaModal(${m.id})">
             <div><p class="font-bold text-slate-200 text-sm">${m.nombre}</p><span class="text-xs text-slate-500 font-mono">${m.creditos} UC</span></div>
             ${m.peso > 0 ? `<span class="bg-blue-500/20 text-blue-400 text-[10px] font-black px-2 py-1 rounded-lg border border-blue-500/30">Abre ${m.peso}</span>` : ''}
-        </div>
-    `).join('') || '<p class="text-sm text-slate-500 text-center py-4">No hay materias disponibles</p>'; 
+        </div>`).join('') || '<p class="text-sm text-slate-500 text-center py-4">No hay materias disponibles</p>'; 
 }
 
 function calculateUnlockWeight(codigo, pensum) {
@@ -434,8 +395,8 @@ function checkDisponibilidad(materia, creditosAprobados, materiasAprobadasCodigo
     }) ? 'disponible' : 'bloqueada'; 
 }
 
-/* ===================== HORARIO ===================== */
-async function loadHorarios() { appState.horarios = await API.get_horarios(appState.currentCareer); }
+/* ===================== HORARIO & CALENDARIO ===================== */
+async function loadHorarios() { appState.horarios = await API.get_horarios(); }
 function renderHorarioLista() {
     const lista = document.getElementById('horario-lista');
     if(!lista) return;
@@ -443,15 +404,19 @@ function renderHorarioLista() {
         <div class="p-3 glass-card bg-white/5 flex justify-between items-center">
             <div><p class="font-bold text-xs text-slate-200">${h.materia_nombre}</p><p class="text-[10px] text-slate-500">${h.dia} ${h.hora_inicio}-${h.hora_fin}</p></div>
             <button onclick="borrarHorario(${h.id})" class="text-red-400 hover:text-red-300"><i class="fas fa-trash"></i></button>
-        </div>
-    `).join('') || '<p class="text-xs text-slate-500 text-center">No hay clases</p>';
-    renderScheduleGrid();
+        </div>`).join('') || '<p class="text-xs text-slate-500 text-center">No hay clases</p>';
 }
-function renderScheduleGrid() { /* Logic for 7am-9pm grid here */ }
-async function guardarHorario() { /* Basic save logic */ }
+async function guardarHorario() { 
+    const m = document.getElementById('horario-materia-select').value;
+    const h_ini = document.getElementById('horario-inicio').value;
+    const h_fin = document.getElementById('horario-fin').value;
+    const dias = Array.from(document.querySelectorAll('.dia-cb:checked')).map(cb => cb.value);
+    if(!m || !h_ini || !h_fin || !dias.length) return alert("Completa los datos");
+    for(let dia of dias) await API.save_horario({ materia_nombre: m, dia, hora_inicio: h_ini, hora_fin: h_fin });
+    loadHorarios().then(renderHorarioLista);
+}
 async function borrarHorario(id) { if(confirm("¿Eliminar?")) { await API.delete_horario(id); loadHorarios().then(renderHorarioLista); } }
 
-/* ===================== CALENDARIO ===================== */
 async function loadEventos() { appState.eventos = await API.get_eventos(); }
 function cambiarMes(o) { appState.currentDate.setMonth(appState.currentDate.getMonth()+o); renderCalendario(); }
 function renderCalendario() {
@@ -474,7 +439,6 @@ function renderCalendario() {
     }
 }
 
-/* ===================== AUTH & API ===================== */
 function poblarSelectsMaterias() {
     const sel = document.getElementById('horario-materia-select');
     if(!sel) return;
@@ -482,80 +446,39 @@ function poblarSelectsMaterias() {
     sel.innerHTML = enCurso.map(m => `<option value="${m.nombre}">${m.nombre}</option>`).join('') + '<option value="MANUAL">-- Otro --</option>';
 }
 
-async function auth(action) { 
-    const u = document.getElementById('auth-user').value;
-    const p = document.getElementById('auth-pass').value;
-    if(!u) return alert("Usuario requerido");
-    const data = action === 'login' ? await API.login(u, p) : await API.register(u, p);
-    if(data.logged_in) window.location.reload(); else alert("Error: " + (data.error || "Acceso denegado"));
-}
-
-async function logout() { await API.logout(); window.location.reload(); }
-
+/* ===================== API OFFLINE NATIVE ===================== */
 const API = {
-    async me() {
-        const db = loadDB();
-        if(!db.currentUser) return { logged_in: false };
-        const u = db.users[db.currentUser];
-        return { logged_in: true, username: db.currentUser, carrera_id: u.currentCareer };
-    },
-    async login(u, p) {
-        const db = loadDB();
-        if(db.users[u]) { db.currentUser = u; saveDB(db); return { logged_in: true }; }
-        return { error: 'No existe usuario' };
-    },
-    async register(u, p) {
-        const db = loadDB();
-        db.users[u] = { password: p, currentCareer: null, progreso: {}, eventos: [], horarios: [] };
-        db.currentUser = u; saveDB(db); return { logged_in: true };
-    },
-    async set_carrera(key) {
-        const db = loadDB();
-        db.users[db.currentUser].currentCareer = key;
-        saveDB(db);
-    },
     async get_pensum(key) {
         const db = loadDB();
         const pBase = JSON.parse(JSON.stringify(PENSUMS_DB[key]));
-        const prog = db.users[db.currentUser].progreso[key] || {};
+        const prog = db.progreso[key] || {};
         pBase.pensum.forEach(m => {
             if(prog[m.id]) { m.estado = prog[m.id].estado; m.nota = prog[m.id].nota; m.periodo = prog[m.id].periodo; }
             else { m.estado = 'Sin Cursar'; m.nota = null; m.periodo = ''; }
         });
+        const kardexRaw = db.kardex_history?.[key] || [];
+        pBase.kardex_history = kardexRaw;
         return pBase;
     },
     async save_progreso(career, id, estado, nota, periodo) {
         const db = loadDB();
-        if(!db.users[db.currentUser].progreso[career]) db.users[db.currentUser].progreso[career] = {};
-        db.users[db.currentUser].progreso[career][id] = { estado, nota, periodo };
+        if(!db.progreso[career]) db.progreso[career] = {};
+        db.progreso[career][id] = { estado, nota, periodo };
+        // Sync to kardex history for stats
+        if(!db.kardex_history[career]) db.kardex_history[career] = [];
+        db.kardex_history[career] = db.kardex_history[career].filter(x => x.materia_id !== id || x.periodo !== periodo);
+        db.kardex_history[career].push({ materia_id: id, estado, nota, periodo });
         saveDB(db);
     },
-    async save_evento(e) {
-        const db = loadDB();
-        if(!db.users[db.currentUser].eventos) db.users[db.currentUser].eventos = [];
-        db.users[db.currentUser].eventos.push({...e, id: Date.now()});
-        saveDB(db);
-    },
-    async get_eventos() { return loadDB().users[loadDB().currentUser]?.eventos || []; },
-    async save_horario(h) {
-        const db = loadDB();
-        if(!db.users[db.currentUser].horarios) db.users[db.currentUser].horarios = [];
-        db.users[db.currentUser].horarios.push({...h, id: Date.now()});
-        saveDB(db);
-    },
-    async get_horarios() { return loadDB().users[loadDB().currentUser]?.horarios || []; },
-    async delete_horario(id) {
-        const db = loadDB();
-        const u = db.users[db.currentUser];
-        u.horarios = u.horarios.filter(x => x.id !== id);
-        saveDB(db);
-    },
-    async logout() { const db = loadDB(); db.currentUser = null; saveDB(db); }
+    async save_evento(e) { const db = loadDB(); db.eventos.push({...e, id: Date.now()}); saveDB(db); },
+    async get_eventos() { return loadDB().eventos || []; },
+    async save_horario(h) { const db = loadDB(); db.horarios.push({...h, id: Date.now()}); saveDB(db); },
+    async get_horarios() { return loadDB().horarios || []; },
+    async delete_horario(id) { const db = loadDB(); db.horarios = db.horarios.filter(x => x.id !== id); saveDB(db); }
 };
 
 function loadDB() {
-    const data = localStorage.getItem('ucv_db');
-    return data ? JSON.parse(data) : { users: {}, currentUser: null };
+    const data = localStorage.getItem('ucv_db_native');
+    return data ? JSON.parse(data) : { currentCareer: null, progreso: {}, eventos: [], horarios: [], kardex_history: {} };
 }
-
-function saveDB(db) { localStorage.setItem('ucv_db', JSON.stringify(db)); }
+function saveDB(db) { localStorage.setItem('ucv_db_native', JSON.stringify(db)); }
