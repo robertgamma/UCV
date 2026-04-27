@@ -1,0 +1,345 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi UCV App | v8.1 - Planificador Inteligente</title>
+<link rel="manifest" href="manifest.json">
+<script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+body{font-family:'Inter',sans-serif;background:#f7f9fb}.card{background:#fff;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,.05)}
+.career-card:hover{transform:translateY(-3px);box-shadow:0 6px 12px rgba(0,0,0,.1);cursor:pointer;border-color:#3b82f6}
+#pensum-visual-container{position:relative;padding-top:20px}#prelaciones-svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.linea-prelacion{stroke:#1f2937;stroke-width:1.5;fill:none;transition:stroke .3s}.linea-prelacion.activa{stroke:#1f2937;stroke-width:2.5;opacity:.3}
+.linea-prelacion.critica{stroke:#000;stroke-width:3;stroke-dasharray:4 2}
+.materia-nodo{width:180px;height:90px;padding:10px;border-radius:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1);cursor:pointer;transition:.2s;display:flex;flex-direction:column;justify-content:center}
+.materia-nodo:hover{transform:scale(1.05)}.materia-nodo.Aprobada{background:#10b981;color:#fff}.materia-nodo.En\\.Curso{background:#8b5cf6;color:#fff}
+.materia-nodo.disponible{background:#bfdbfe;color:#1e40af;border:2px solid #3b82f6}.materia-nodo.bloqueada{background:#fecaca;color:#991b1b;border:2px dashed #ef4444;cursor:not-allowed}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+.schedule-grid-table { border-collapse:collapse; width:100%; min-width:600px; box-shadow:0 4px 6px -1px rgba(0,0,0,.1); }
+.schedule-grid-table th { border:1px solid #e5e7eb; padding:0; height:30px; text-align:center; vertical-align:top; position:relative; }
+.schedule-grid-table td { border:1px solid #e5e7eb; padding:0; height:30px; text-align:center; vertical-align:top; position:relative; background:#fff; }
+.time-header{width:60px;background:#f3f4f6;font-weight:600;font-size:.75rem;text-align:right!important;padding-right:4px!important;vertical-align:middle!important;border-left:none!important}
+.course-block{position:absolute;width:100%;left:0;right:0;z-index:10;padding:2px 4px;font-size:.7rem;font-weight:600;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden;line-height:1.2;text-align:left;color:#fff;cursor:pointer}
+.course-block:hover{filter:brightness(1.1)}.seccion-card{transition:all .2s;border-left:4px solid transparent}.seccion-card.disponible{border-left-color:#10b981}
+.seccion-card.choque{border-left-color:#ef4444;opacity:.6}.seccion-card:hover{transform:translateX(4px);box-shadow:0 4px 12px rgba(0,0,0,.1)}</style></head>
+<body class="flex flex-col min-h-screen">
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="flex-grow flex items-center justify-center p-4 bg-blue-50">
+<div class="card p-8 w-full max-w-md shadow-xl border border-blue-100">
+<h1 class="text-3xl font-black text-center text-blue-900 mb-6"><i class="fas fa-graduation-cap"></i> Planificador UCV</h1>
+<div id="auth-error" class="hidden mb-4 p-3 bg-red-100 text-red-700 rounded text-sm font-bold text-center"></div>
+<div class="space-y-4">
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Usuario</label><input type="text" id="auth-user" class="w-full p-3 border rounded-lg focus:ring-2 outline-none" placeholder="tu_usuario"></div>
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Clave</label><input type="password" id="auth-pass" class="w-full p-3 border rounded-lg focus:ring-2 outline-none" placeholder="••••••••"></div>
+<div class="flex gap-4 pt-2">
+<button onclick="auth('login')" class="w-1/2 bg-blue-600 text-white font-bold py-3 rounded-lg shadow hover:bg-blue-700 transition"><i class="fas fa-sign-in-alt"></i> Entrar</button>
+<button onclick="auth('register')" class="w-1/2 bg-white border-2 border-blue-600 text-blue-600 font-bold py-3 rounded-lg shadow hover:bg-blue-50 transition"><i class="fas fa-user-plus"></i> Registrarse</button>
+</div>
+<p class="text-center text-sm font-medium text-gray-500 mt-4 cursor-pointer hover:underline" onclick="alert('Para recuperar tu clave, contacta a Robert.')"><i class="fas fa-key"></i> ¿Olvidaste tu contraseña?</p>
+</div></div></div>
+<!-- ONBOARDING -->
+<div id="onboarding-screen" class="hidden flex-grow flex items-center justify-center p-4 bg-gray-50">
+<div class="w-full max-w-3xl">
+<h1 class="text-3xl font-extrabold text-gray-900 text-center mb-2"><i class="fas fa-rocket"></i> ¡Bienvenido!</h1>
+<p class="text-center text-gray-600 font-medium mb-8">¿De qué ingeniería eres?</p>
+<div id="ob-career-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+</div></div>
+<!-- MAIN APP -->
+<div id="main-app" class="hidden flex-grow flex flex-col items-center p-4 w-full">
+<div id="planner-screen" class="w-full max-w-7xl mx-auto">
+<header class="mb-4">
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+<div><h1 class="text-3xl font-extrabold text-gray-900"><i class="fas fa-tachometer-alt"></i> Panel Estudiantil</h1>
+<p class="text-blue-600 font-bold text-lg" id="user-greeting"></p></div>
+<div class="flex gap-2 mt-3 sm:mt-0">
+<span id="career-badge" class="px-4 py-2 bg-blue-100 text-blue-800 font-bold rounded-lg border border-blue-200"></span>
+<a id="btn-descargar-pensum" href="#" target="_blank" class="px-4 py-2 bg-gray-600 text-white font-bold rounded-lg hover:bg-gray-700 shadow"><i class="fas fa-file-pdf"></i> Pénsum</a>
+<button onclick="exportarHorarioICS()" class="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 shadow"><i class="fas fa-calendar-export"></i> .ICS</button>
+<button onclick="logout()" class="px-4 py-2 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 shadow"><i class="fas fa-sign-out-alt"></i> Salir</button>
+</div></div></header>
+<nav class="flex flex-wrap space-x-2 mb-6 border-b border-gray-300 pb-2 overflow-x-auto">
+<button onclick="switchTab('progreso')" id="tab-progreso" class="px-4 py-2 font-bold text-blue-600 border-b-2 border-blue-600 whitespace-nowrap"><i class="fas fa-book"></i> Progreso</button>
+<button onclick="switchTab('kardex')" id="tab-kardex" class="px-4 py-2 font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap"><i class="fas fa-chart-line"></i> Kárdex</button>
+<button onclick="switchTab('horario')" id="tab-horario" class="px-4 py-2 font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap"><i class="fas fa-clock"></i> Horario</button>
+<button onclick="switchTab('evaluaciones')" id="tab-evaluaciones" class="px-4 py-2 font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap"><i class="fas fa-check-double"></i> Planes de Evaluación</button>
+<button onclick="switchTab('calendario')" id="tab-calendario" class="px-4 py-2 font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap"><i class="fas fa-calendar-alt"></i> Calendario</button>
+<button onclick="switchTab('pd')" id="tab-pd" class="px-4 py-2 font-bold text-gray-500 hover:text-blue-600 whitespace-nowrap"><i class="fas fa-search"></i> Buscar PD</button>
+<button onclick="switchTab('editor')" id="tab-editor" class="hidden px-4 py-2 font-bold text-gray-500 hover:text-purple-600 whitespace-nowrap"><i class="fas fa-code"></i> Editor</button>
+</nav>
+<!-- PROGRESO -->
+<div id="progreso-section" class="w-full">
+<div class="card p-4 mb-6 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+<div class="w-full md:w-1/2"><h3 class="text-lg font-bold text-gray-800 mb-2"><i class="fas fa-tasks"></i> Progreso General</h3>
+<div class="w-full bg-gray-200 rounded-full h-6 mb-1"><div id="progressBar" class="bg-blue-600 h-6 rounded-full text-center text-white text-xs font-bold leading-6" style="width:0%">0%</div></div></div>
+<div class="flex gap-4 text-sm font-medium text-gray-600 w-full md:w-1/2 justify-around">
+<div class="text-center"><span id="creditos-aprobados" class="block text-xl font-black text-blue-600">0</span>UC Aprob.</div>
+<div class="text-center"><span id="creditos-basico" class="block text-xl font-black text-gray-800">0</span>Básico Rest.</div>
+<div class="text-center"><span id="creditos-escuela" class="block text-xl font-black text-gray-800">0</span>Escuela Rest.</div>
+</div></div>
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+<div class="card p-4 lg:col-span-1 h-fit shadow-sm border-t-4 border-blue-500">
+<h3 class="font-bold text-lg text-gray-800 mb-3"><i class="fas fa-lightbulb"></i> Sugerencias</h3>
+<div id="materias-disponibles-lista" class="space-y-3 max-h-[500px] overflow-y-auto pr-2"></div>
+</div>
+<div class="lg:col-span-3">
+<div class="flex space-x-2 mb-4 overflow-x-auto pb-2">
+<button onclick="changeView('list')" class="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow" id="btn-list"><i class="fas fa-list"></i> Lista</button>
+<button onclick="changeView('visual')" class="px-4 py-2 bg-gray-200 text-gray-800 font-bold rounded-lg" id="btn-visual"><i class="fas fa-sitemap"></i> Mapa Visual</button>
+<button onclick="changeView('optimal')" class="px-4 py-2 bg-gray-200 text-gray-800 font-bold rounded-lg" id="btn-optimal"><i class="fas fa-route"></i> Ruta Óptima</button>
+</div>
+<div id="semestres" class="space-y-6"></div>
+<div id="pensum-visual-container" class="hidden relative overflow-x-auto border rounded-lg bg-white p-4 shadow-sm min-h-[500px]">
+<svg id="prelaciones-svg"></svg><div id="pensum-visual" class="flex flex-col items-center"></div>
+</div>
+<div id="optimal-planner-container" class="hidden space-y-6"><div id="optimal-plan-results" class="space-y-4"></div></div>
+</div></div></div>
+<!-- KARDEX -->
+<div id="kardex-section" class="w-full hidden">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<div class="lg:col-span-1 space-y-6">
+<div class="card p-6 shadow-sm"><h3 class="text-xl font-bold text-purple-900 border-b pb-2 mb-4"><i class="fas fa-file-pdf"></i> Importar PDF (Kárdex)</h3>
+<p class="text-xs text-purple-700 mb-3">Tu historial y estado de notas.</p>
+<input type="file" id="kardex-file" accept="application/pdf" class="w-full text-sm mb-2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-100 file:text-purple-700 font-bold">
+<button onclick="parsePDF('kardex')" id="btn-parse-kardex" class="w-full bg-purple-600 text-white font-bold py-2 rounded text-sm hover:bg-purple-700 shadow"><i class="fas fa-magic"></i> Ejecutar Escaneo</button>
+<p id="kardex-parse-status" class="text-xs font-bold text-center mt-2"></p>
+</div>
+<div class="card p-6 shadow-sm border-t-4 border-blue-600"><h3 class="text-gray-500 font-bold text-sm uppercase">Promedio General</h3><p id="kx-promedio-gral" class="text-4xl font-black text-gray-900 mt-1">0.0000</p></div>
+<div class="card p-6 shadow-sm border-t-4 border-green-500"><h3 class="text-gray-500 font-bold text-sm uppercase">Eficiencia Total</h3><p id="kx-eficiencia" class="text-4xl font-black text-gray-900 mt-1">0.00%</p></div>
+<div class="card p-6 shadow-sm border-t-4 border-yellow-500"><h3 class="text-gray-500 font-bold text-sm uppercase">UC Cursadas</h3><p id="kx-uc-cursadas" class="text-2xl font-black text-gray-900 mt-1">0</p></div>
+</div>
+<div class="lg:col-span-2 space-y-6">
+<div class="card p-6 shadow-sm border border-purple-200 bg-white">
+<h3 class="text-xl font-bold text-gray-800 mb-2 flex justify-between items-center"><span><i class="fas fa-robot"></i> Análisis de IA</span>
+<button onclick="generarReporteIA()" class="text-sm bg-purple-600 text-white font-bold px-4 py-2 rounded hover:bg-purple-700 shadow"><i class="fas fa-play"></i> Diagnosticar</button></h3>
+<div id="ai-report-container" class="mt-4 hidden p-4 bg-purple-50 text-gray-800 text-sm leading-relaxed border rounded-lg shadow-inner"></div>
+</div>
+<div class="card p-6 shadow-sm border border-gray-200">
+<h3 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-chart-area"></i> Gráfica Multi-Indicador</h3>
+<div class="w-full h-[350px] relative"><canvas id="kardexChart"></canvas></div>
+<div id="kardex-table" class="mt-6 space-y-4 max-h-[400px] overflow-y-auto pr-2"></div>
+</div></div></div></div>
+<!-- HORARIO -->
+<div id="horario-section" class="w-full hidden">
+<div class="flex flex-col xl:flex-row gap-6">
+<div class="w-full xl:w-1/3 space-y-6">
+<div id="robert-tools" class="hidden card p-5 bg-blue-50 border border-blue-300 shadow-sm">
+<h3 class="font-extrabold text-blue-900 mb-2"><i class="fas fa-crown"></i> Sincronización Web</h3>
+<p class="text-xs text-blue-700 mb-3">Conecta con MWikiCPD.</p>
+<button onclick="fetchOfertaPD()" id="btn-fetch-oferta" class="w-full bg-blue-600 text-white font-bold py-2 rounded hover:bg-blue-700 shadow"><i class="fas fa-cloud-download-alt"></i> Descargar Oferta</button>
+<p id="oferta-status" class="text-xs font-bold text-center mt-2"></p>
+</div>
+<div class="card p-5 shadow-sm border border-gray-100 bg-white">
+<h3 class="font-extrabold text-xl text-gray-800 mb-4"><i class="fas fa-plus-circle"></i> Añadir Clase</h3>
+<div class="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm">
+<p class="font-bold text-purple-900 mb-1"><i class="fas fa-file-pdf"></i> Horario desde PDF</p>
+<input type="file" id="horario-file" accept="application/pdf" class="w-full mb-2 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-100 file:text-purple-700 font-bold">
+<button onclick="parsePDF('horario')" id="btn-parse-horario" class="w-full bg-purple-600 text-white font-bold py-1.5 rounded hover:bg-purple-700"><i class="fas fa-magic"></i> Analizar y Armar</button>
+<p id="horario-parse-status" class="text-xs font-bold text-center mt-2"></p>
+</div>
+<hr class="mb-4 border-gray-200">
+<div class="space-y-4">
+<label class="block text-xs font-bold text-gray-500 uppercase">Sección Manual ('En Curso')</label>
+<select id="horario-materia-select" class="w-full p-2 border rounded font-medium bg-gray-50"></select>
+<input type="text" id="horario-materia-manual" placeholder="Escribe el nombre..." class="w-full p-2 border rounded font-medium hidden">
+<div class="grid grid-cols-2 gap-2">
+<div id="horario-dia-container" class="flex flex-wrap gap-2 text-xs items-center bg-gray-50 p-2 border rounded font-medium"><label><input type="checkbox" value="Lunes" class="dia-cb"> Lun</label><label><input type="checkbox" value="Martes" class="dia-cb"> Mar</label><label><input type="checkbox" value="Miercoles" class="dia-cb"> Mié</label><label><input type="checkbox" value="Jueves" class="dia-cb"> Jue</label><label><input type="checkbox" value="Viernes" class="dia-cb"> Vie</label><label><input type="checkbox" value="Sabado" class="dia-cb"> Sáb</label></div>
+<input type="text" id="horario-seccion" placeholder="Sec: 001" class="p-2 border rounded font-medium">
+</div>
+<div class="flex gap-2"><input type="time" id="horario-inicio" class="w-full p-2 border rounded" value="07:00"><input type="time" id="horario-fin" class="w-full p-2 border rounded" value="08:30"></div>
+<div class="grid grid-cols-2 gap-2"><input type="text" id="horario-aula" placeholder="Aula" class="p-2 border rounded"><input type="text" id="horario-profesor" placeholder="Profesor" class="p-2 border rounded"></div>
+<input type="color" id="horario-color" value="#3b82f6" class="w-full h-10 border-none bg-transparent cursor-pointer">
+<button onclick="guardarHorario()" class="w-full bg-blue-600 text-white font-bold py-2 rounded hover:bg-blue-700 shadow"><i class="fas fa-plus"></i> Añadir al Grid</button>
+<div id="conflict-alert" class="hidden p-2 bg-red-100 text-red-700 rounded text-xs font-bold text-center"></div>
+</div></div>
+<div class="card p-5 shadow-sm border border-green-200 bg-green-50">
+<h3 class="font-extrabold text-green-900 mb-2"><i class="fas fa-search"></i> Buscar Secciones</h3>
+<p class="text-xs text-green-700 mb-3">Secciones disponibles sin choques</p>
+<select id="buscar-materia-select" class="w-full p-2 border rounded font-medium bg-white mb-2" onchange="cargarSeccionesDisponibles()"></select>
+<button onclick="cargarSeccionesDisponibles()" class="w-full bg-green-600 text-white font-bold py-2 rounded hover:bg-green-700 shadow"><i class="fas fa-sync"></i> Buscar Ahora</button>
+<div id="secciones-resultados" class="mt-3 space-y-2 max-h-60 overflow-y-auto"></div>
+</div></div>
+<div class="w-full xl:w-2/3">
+<div class="card shadow-lg border border-gray-200 overflow-hidden bg-white p-2">
+<div class="flex justify-between items-center mb-4 ml-2">
+<h3 class="font-extrabold text-blue-900 text-xl"><i class="fas fa-th-large"></i> Cuadrícula Semanal</h3>
+</div>
+<div class="overflow-x-auto w-full"><div id="scheduleGridContainer" class="min-w-[600px] relative"></div></div>
+</div>
+<div class="card p-4 mt-4 shadow-sm">
+<h4 class="font-bold text-gray-800 mb-2"><i class="fas fa-list"></i> Mis Clases</h4>
+<div id="horario-lista" class="space-y-2 max-h-40 overflow-y-auto"></div>
+</div></div></div></div>
+<!-- EVALUACIONES -->
+<div id="evaluaciones-section" class="w-full hidden">
+<div class="card p-6 shadow-sm border border-gray-200">
+  <div class="flex justify-between items-center mb-4">
+    <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-check-double text-blue-600"></i> Seguimiento de Notas</h2>
+    <button onclick="abrirSimulador()" class="px-4 py-2 bg-purple-600 text-white font-bold rounded shadow hover:bg-purple-700"><i class="fas fa-calculator"></i> Simulador What-If</button>
+  </div>
+  <p class="text-sm text-gray-600 mb-6">Planifica tus evaluaciones para las materias que tienes <b class="bg-purple-100 text-purple-800 px-1 rounded">En Curso</b>. Registra el peso (%) y la nota sobre 20. El sistema enviará las fechas a tu Calendario.</p>
+  <div id="evaluaciones-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6"></div>
+</div>
+</div>
+<!-- PD -->
+<div id="pd-section" class="w-full hidden">
+<div class="card p-6 shadow-sm">
+<h2 class="text-2xl font-extrabold text-gray-900 mb-4"><i class="fas fa-search"></i> Buscador de Secciones PD</h2>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Materia (código)</label><input type="text" id="pd-codigo" placeholder="Ej: 0251" class="w-full p-3 border rounded-lg" maxlength="4"></div>
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Filtrar por día</label><select id="pd-dia" class="w-full p-3 border rounded-lg"><option value="">Todos los días</option><option value="Lunes">Lunes</option><option value="Martes">Martes</option><option value="Miercoles">Miércoles</option><option value="Jueves">Jueves</option><option value="Viernes">Viernes</option><option value="Sabado">Sábado</option></select></div>
+<div class="flex items-end"><button onclick="buscarSeccionesPD()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 shadow"><i class="fas fa-search"></i> Buscar</button></div>
+</div>
+<div id="pd-resultados" class="space-y-3"></div>
+</div></div>
+<div id="calendario-section" class="w-full hidden">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+<div class="col-span-1 border rounded-lg bg-blue-50 border-blue-200 p-4 shadow-sm">
+<h3 class="font-black text-blue-900 mb-2"><i class="fas fa-calendar-alt"></i> Importar Calendario Académico</h3>
+<p class="text-[11px] text-blue-700 mb-2">Escanea el cronograma de semanas ucv.</p>
+<input type="file" id="calendario-file" accept="application/pdf" class="w-full text-sm mb-2 font-bold file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700">
+<button onclick="parsePDF('calendario')" id="btn-parse-calendario" class="w-full bg-blue-600 text-white font-bold py-2 rounded text-sm hover:bg-blue-700 shadow"><i class="fas fa-robot"></i> Importar (IA)</button>
+<p id="calendario-parse-status" class="text-xs font-bold text-center mt-2"></p>
+</div>
+<div class="md:col-span-2 card p-6 shadow-sm">
+<div class="flex justify-between items-center mb-6">
+<button onclick="cambiarMes(-1)" class="px-4 py-2 bg-gray-100 font-bold rounded hover:bg-gray-200"><i class="fas fa-chevron-left"></i> Anterior</button>
+<h2 id="mes-anio-display" class="text-2xl font-extrabold text-gray-800 capitalize"></h2>
+<button onclick="cambiarMes(1)" class="px-4 py-2 bg-gray-100 font-bold rounded hover:bg-gray-200">Siguiente <i class="fas fa-chevron-right"></i></button>
+</div>
+<div class="grid grid-cols-7 gap-2 text-center font-bold text-gray-500 mb-2"><div class="text-red-500">Dom</div><div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div class="text-blue-500">Sáb</div></div>
+<div id="calendario-grid" class="grid grid-cols-7 gap-1 sm:gap-2"></div>
+</div>
+</div>
+</div>
+
+<!-- PROGRAMACION SEMANAL -->
+<div class="card p-6 shadow-sm border border-purple-200 mt-2">
+<div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+  <div><h2 class="text-xl font-black text-purple-900"><i class="fas fa-table"></i> Programacion Semanal</h2>
+  <p class="text-xs text-gray-500 mt-1">Planifica tus semanas. Gemini puede extraerla de un PDF.</p></div>
+  <div class="flex gap-2 flex-wrap items-center">
+    <div class="border rounded-lg bg-purple-50 p-2 flex gap-2 items-center flex-wrap">
+      <input type="file" id="semana-pdf-file" accept="application/pdf" class="text-xs file:mr-1 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-200 file:text-purple-800 font-bold">
+      <button onclick="parsePDF('semanas')" id="btn-parse-semanas" class="bg-purple-600 text-white font-bold px-3 py-1.5 rounded text-xs hover:bg-purple-700 shadow whitespace-nowrap"><i class="fas fa-magic"></i> Extraer con IA</button>
+    </div>
+    <p id="semanas-parse-status" class="text-xs font-bold self-center"></p>
+    <button onclick="agregarSemana()" class="bg-green-600 text-white font-bold px-4 py-2 rounded shadow hover:bg-green-700 text-sm"><i class="fas fa-plus"></i> Anadir Semana</button>
+  </div>
+</div>
+<div class="overflow-x-auto"><table class="w-full text-sm border-collapse min-w-[640px]">
+  <thead><tr class="bg-purple-100 text-purple-900 text-left">
+    <th class="p-2 border text-center w-12">Sem.</th><th class="p-2 border text-center w-32">Fecha</th>
+    <th class="p-2 border">Materia</th><th class="p-2 border">Tema / Actividad</th>
+    <th class="p-2 border text-center w-20">Acciones</th>
+  </tr></thead>
+  <tbody id="semanas-tbody">
+    <tr id="semanas-empty-row"><td colspan="5" class="text-center text-gray-400 py-6 italic">No hay semanas. Anade una o importa con IA.</td></tr>
+  </tbody>
+</table></div></div>
+<!-- EDITOR -->
+<div id="editor-section" class="w-full hidden card p-6 shadow-xl border-2 border-purple-500">
+<div class="flex justify-between items-center mb-4">
+<h2 class="text-2xl font-black text-purple-900"><i class="fas fa-terminal"></i> Terminal Administrativa</h2>
+<button onclick="saveCode()" class="bg-purple-600 text-white px-5 py-2 font-bold rounded hover:bg-purple-700 shadow"><i class="fas fa-save"></i> Sobrescribir app.py</button>
+</div>
+<p class="text-sm text-gray-600 mb-4 font-medium border-l-4 border-yellow-400 pl-3 py-1 bg-yellow-50"><i class="fas fa-exclamation-triangle"></i> Requiere Reload en PythonAnywhere.</p>
+<textarea id="code-editor" class="w-full h-[600px] p-4 bg-gray-900 text-green-400 font-mono text-sm rounded shadow-inner outline-none focus:ring-2 focus:ring-purple-500" spellcheck="false"></textarea>
+</div>
+</div></div>
+<footer class="mt-auto w-full text-center py-6 text-gray-500 font-bold text-sm bg-gray-100 mt-10 border-t"><p><i class="fas fa-heart text-red-500"></i> TA SARM | v8.2 Completo</p></footer>
+<!-- MODALES -->
+<div id="materia-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+<div class="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
+<h3 id="modal-mat-nombre" class="font-extrabold text-xl text-gray-900 mb-1"></h3>
+<p id="modal-mat-codigo" class="text-sm text-gray-500 font-medium mb-4"></p>
+<p class="text-xs text-blue-600 mb-4 font-bold bg-blue-50 p-2 rounded"><i class="fas fa-info-circle"></i> El Kárdex guarda historia.</p>
+<input type="hidden" id="modal-mat-id">
+<div class="space-y-4">
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Estado Actual</label>
+<select id="modal-mat-estado" onchange="toggleNotaInput()" class="w-full p-2 border rounded bg-gray-50 font-bold">
+<option value="Sin Cursar">Eliminar Registro (Borrar)</option><option value="En Curso">En Curso (Actual)</option><option value="Aprobada">Aprobada</option><option value="Reprobada">Reprobada / No Asistió</option><option value="Retirada">Retirada</option>
+</select></div>
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Nota (0-20)</label><input type="number" id="modal-mat-nota" min="0" max="20" class="w-full p-2 border rounded font-bold text-lg text-center"></div>
+<div><label class="block text-sm font-bold text-gray-700 mb-1">Período (Ej: 2024-1)</label><input type="text" id="modal-mat-periodo" placeholder="YYYY-P" class="w-full p-2 border rounded font-medium"></div>
+</div>
+<div class="flex justify-end gap-3 mt-6">
+<button onclick="document.getElementById('materia-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 font-bold rounded"><i class="fas fa-times"></i> Cancelar</button>
+<button onclick="guardarMateria()" class="px-4 py-2 bg-blue-600 font-bold rounded text-white shadow"><i class="fas fa-check"></i> Guardar Cambios</button>
+</div></div></div>
+<div id="evento-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-60 flex justify-center items-center z-50 px-4">
+<div class="bg-white p-6 rounded-xl w-full max-w-md shadow-2xl">
+<h3 class="font-extrabold text-xl text-gray-800 mb-4"><i class="fas fa-plus"></i> Añadir Tarea / Examen</h3>
+<p id="evento-fecha-display" class="text-sm font-bold text-blue-600 mb-4"></p>
+<select id="evento-materia-select" class="w-full p-3 border rounded mb-2 font-medium bg-gray-50"></select>
+<input type="text" id="evento-titulo-manual" placeholder="Escribir título manual..." class="w-full p-3 border rounded mb-4 font-medium hidden">
+<input type="color" id="evento-color" value="#f59e0b" class="w-full h-10 border-none bg-transparent cursor-pointer mb-6">
+<div class="flex justify-end gap-3">
+<button onclick="document.getElementById('evento-modal').classList.add('hidden')" class="px-5 py-2 bg-gray-200 font-bold rounded text-gray-800"><i class="fas fa-times"></i> Cancelar</button>
+<button onclick="guardarEvento()" class="px-5 py-2 bg-blue-600 text-white font-bold rounded"><i class="fas fa-check"></i> Guardar Evento</button>
+</div></div></div>
+<div id="seccion-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+<div class="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+<h3 class="font-extrabold text-xl text-gray-900 mb-2" id="seccion-modal-nombre"></h3>
+<p class="text-sm text-gray-500 mb-4" id="seccion-modal-info"></p>
+<div class="space-y-3 mb-4">
+<div class="flex justify-between text-sm"><span class="font-bold">Sección:</span><span id="seccion-modal-seccion"></span></div>
+<div class="flex justify-between text-sm"><span class="font-bold">Días:</span><span id="seccion-modal-dias"></span></div>
+<div class="flex justify-between text-sm"><span class="font-bold">Horario:</span><span id="seccion-modal-horario"></span></div>
+<div class="flex justify-between text-sm"><span class="font-bold">Aula:</span><span id="seccion-modal-aula"></span></div>
+<div class="flex justify-between text-sm"><span class="font-bold">Profesor:</span><span id="seccion-modal-profesor"></span></div>
+<div class="flex justify-between text-sm"><span class="font-bold">Cupos:</span><span id="seccion-modal-cupos"></span></div>
+</div>
+<div id="seccion-conflict-alert" class="hidden p-2 bg-red-100 text-red-700 rounded text-xs font-bold mb-4"></div>
+<div class="flex justify-end gap-3">
+<button onclick="document.getElementById('seccion-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 font-bold rounded">Cancelar</button>
+<button onclick="confirmarSeccion()" class="px-4 py-2 bg-green-600 text-white font-bold rounded shadow"><i class="fas fa-plus"></i> Añadir a Mi Horario</button>
+</div></div></div>
+<div id="simulador-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+<div class="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl">
+<h3 class="font-extrabold text-xl text-purple-900 mb-2"><i class="fas fa-calculator"></i> Simulador "What-If"</h3>
+<p class="text-sm text-gray-600 mb-4">¿Qué pasa si saco X nota en las materias en curso?</p>
+<div id="simulador-materias" class="space-y-3 max-h-60 overflow-y-auto pr-2 mb-4"></div>
+<div class="card p-4 bg-purple-50 border border-purple-200 flex justify-between items-center text-center">
+  <div><p class="text-xs font-bold text-purple-600 uppercase">Promedio General</p><p id="sim-promedio" class="text-2xl font-black text-purple-900">0.000</p></div>
+  <div><p class="text-xs font-bold text-green-600 uppercase">Eficiencia Total</p><p id="sim-eficiencia" class="text-2xl font-black text-green-900">0.0%</p></div>
+</div>
+<div class="flex justify-end gap-3 mt-4">
+<button onclick="document.getElementById('simulador-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 font-bold rounded">Cerrar</button>
+</div></div></div>
+
+<!-- MODAL: Nota desde Calendario -->
+<div id="nota-eval-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+<div class="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
+<h3 class="font-extrabold text-xl text-blue-900 mb-1"><i class="fas fa-pen"></i> Registrar Nota</h3>
+<p id="nota-eval-titulo" class="text-sm text-gray-600 font-medium mb-4"></p>
+<input type="hidden" id="nota-eval-id">
+<label class="block text-sm font-bold text-gray-700 mb-1">Nota obtenida (0-20)</label>
+<input type="number" id="nota-eval-input" min="0" max="20" step="0.5" class="w-full p-3 border-2 rounded-lg font-black text-2xl text-center mb-2" placeholder="0">
+<p class="text-xs text-gray-500 mb-4">Se redondeara al entero mas cercano (ej. 9.5 -> 10)</p>
+<div class="flex gap-3">
+<button onclick="document.getElementById('nota-eval-modal').classList.add('hidden')" class="flex-1 py-2 bg-gray-200 font-bold rounded"><i class="fas fa-times"></i> Cancelar</button>
+<button onclick="guardarNotaDesdeCalendario()" class="flex-1 py-2 bg-blue-600 text-white font-bold rounded shadow"><i class="fas fa-check"></i> Guardar</button>
+</div></div></div>
+<!-- MODAL: Editar/Anadir Semana -->
+<div id="semana-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+<div class="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+<h3 class="font-extrabold text-xl text-purple-900 mb-4"><i class="fas fa-calendar-week"></i> <span id="semana-modal-title">Anadir Semana</span></h3>
+<input type="hidden" id="semana-modal-id">
+<div class="space-y-3">
+  <div class="flex gap-2">
+    <div class="w-1/3"><label class="block text-xs font-bold text-gray-600 mb-1">Nro. Semana</label><input type="number" id="semana-modal-numero" min="1" class="w-full p-2 border rounded font-bold text-center"></div>
+    <div class="w-2/3"><label class="block text-xs font-bold text-gray-600 mb-1">Fecha de inicio</label><input type="date" id="semana-modal-fecha" class="w-full p-2 border rounded"></div>
+  </div>
+  <div><label class="block text-xs font-bold text-gray-600 mb-1">Materia</label><select id="semana-modal-materia" class="w-full p-2 border rounded font-medium bg-gray-50"></select></div>
+  <div><label class="block text-xs font-bold text-gray-600 mb-1">Tema / Actividad</label><textarea id="semana-modal-tema" rows="3" class="w-full p-2 border rounded font-medium resize-none" placeholder="Ej: Unidad 2 - Integracion por partes"></textarea></div>
+</div>
+<div class="flex gap-3 mt-4">
+<button onclick="document.getElementById('semana-modal').classList.add('hidden')" class="flex-1 py-2 bg-gray-200 font-bold rounded"><i class="fas fa-times"></i> Cancelar</button>
+<button onclick="guardarSemanaModal()" class="flex-1 py-2 bg-purple-600 text-white font-bold rounded shadow"><i class="fas fa-check"></i> Guardar</button>
+</div></div></div>
+
+<!-- LIBRERIAS EXTERNAS -->
+<script src="pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';</script>
+<!-- SCRIPTS LOCALES -->
+<script src="pensums.js"></script>
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body></html>
