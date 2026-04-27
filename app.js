@@ -93,104 +93,109 @@ function switchTab(tab) {
 }
 
 async function parsePDF(type) {
-    const fileInput = document.getElementById(type + '-file');
-    const statusText = document.getElementById(type + '-parse-status');
-    if (!statusText) return;
-    if(!fileInput.files[0]) { 
-        statusText.textContent = "Sube un archivo PDF."; 
-        statusText.className = "text-xs font-bold text-center mt-2 text-red-600"; 
-        return; 
-    }
-    
+    const fileInputId = type === 'semanas' ? 'semanas-file' : (type + '-file');
+    const fileInput = document.getElementById(fileInputId);
+    const statusEl = document.getElementById(type + '-parse-status');
+    const btnEl = document.getElementById('btn-parse-' + type);
+
+    const showStatus = (msg, color) => { if(statusEl) { statusEl.textContent = msg; statusEl.className = `text-xs font-bold text-center mt-2 ${color}`; } };
+
+    if (!fileInput || !fileInput.files[0]) { showStatus('⚠️ Sube un archivo PDF primero.', 'text-red-600'); return; }
+
     const db = loadDB();
+    if (!db.currentUser) { showStatus('❌ No hay sesión activa.', 'text-red-600'); return; }
     let apiKey = db.users[db.currentUser].geminiApiKey;
     if (!apiKey) {
-        apiKey = prompt("Para usar la IA necesitas colocar tu Google Gemini API Key aquí:");
-        if (apiKey) { await API.set_api_key(apiKey); }
-        else return;
+        apiKey = prompt('Para usar la IA necesitas tu Google Gemini API Key:');
+        if (apiKey) await API.set_api_key(apiKey);
+        else { showStatus('❌ API Key requerida.', 'text-red-600'); return; }
     }
 
-    statusText.textContent = "Extrayendo texto del PDF localmente..."; 
-    statusText.className = "text-xs font-bold text-center mt-2 text-purple-600 animate-pulse";
-    document.getElementById('btn-parse-'+type).disabled = true;
-    
+    showStatus('📄 Extrayendo texto del PDF...', 'text-purple-600 animate-pulse');
+    if (btnEl) btnEl.disabled = true;
+
     try {
-        const file = fileInput.files[0];
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-        let text = "";
+        // Extract text from PDF
+        const ab = await fileInput.files[0].arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(ab).promise;
+        let text = '';
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-            text += content.items.map(item => item.str).join(" ") + "\n";
+            text += content.items.map(item => item.str).join(' ') + '\n';
         }
+        if (!text.trim()) throw new Error('El PDF no tiene texto extraíble (puede ser imagen). Prueba con otro archivo.');
 
-        statusText.textContent = "Enviando a Gemini...";
-        
-        let promptText = "";
+        showStatus('🤖 Enviando a Gemini...', 'text-purple-600 animate-pulse');
+
+        let promptText = '';
         if (type === 'kardex') {
-            promptText = `Extrae las materias del Kardex. Retorna SOLO un array JSON: [{"codigo":"0251", "estado":"Aprobada/Reprobada/En Curso/Retirada", "nota":15, "periodo":"2023-1"}]. Ignora el texto introductorio. Texto:\n` + text.substring(0, 15000);
+            promptText = `Analiza este Kardex universitario y extrae las materias. Retorna SOLO un array JSON valido, sin explicaciones: [{"codigo":"0251", "estado":"Aprobada", "nota":15, "periodo":"2023-1"}]. Estados validos: Aprobada, Reprobada, En Curso, Retirada. Texto del PDF:\n${text.substring(0, 15000)}`;
         } else if (type === 'horario') {
-            promptText = `Extrae la Oferta Docente. Retorna SOLO JSON: [{"codigo":"0251", "seccion":"001", "dias":["Lunes","Miercoles"], "hora_inicio":"07:00", "hora_fin":"08:30", "aula":"AU-101", "profesor":"Perez"}]. Texto:\n` + text.substring(0, 45000);
+            promptText = `Extrae la Oferta Docente (secciones) de este PDF universitario. Retorna SOLO un array JSON valido: [{"codigo":"0251", "seccion":"001", "dias":["Lunes","Miercoles"], "hora_inicio":"07:00", "hora_fin":"08:30", "aula":"AU-101", "profesor":"Perez"}]. Texto:\n${text.substring(0, 45000)}`;
         } else if (type === 'calendario') {
-            promptText = `Extrae el calendario. Retorna SOLO JSON: {"eventos": [{"titulo": "Inicio Clases", "fecha": "2024-03-15", "color": "#f59e0b"}]}. Formato YYYY-MM-DD. Texto:\n` + text.substring(0, 15000);
+            promptText = `Extrae todos los eventos y fechas importantes de este calendario universitario. Retorna SOLO un array JSON valido (no objeto, sino array directo): [{"titulo":"Inicio de Clases", "fecha":"2024-03-15", "color":"#f59e0b"}]. La fecha debe ser formato YYYY-MM-DD. Si no tienes fecha exacta omite el evento. Texto:\n${text.substring(0, 15000)}`;
         } else if (type === 'semanas') {
-            promptText = `Extrae la programacion semanal del curso. Para cada semana retorna: numero de semana, fecha de inicio (YYYY-MM-DD si disponible o null), nombre de la materia, y tema o actividad planificada. Retorna SOLO un array JSON: [{"numero":1, "fecha":"2024-03-15", "materia":"Calculo I", "tema":"Introduccion al calculo diferencial"}]. Texto:\n` + text.substring(0, 45000);
+            promptText = `Extrae la programacion semanal de este documento universitario. Para cada semana identifica: numero de semana, fecha de inicio en formato YYYY-MM-DD (o null si no hay), nombre de la materia o asignatura, y el tema o actividad planificada. Retorna SOLO un array JSON valido: [{"numero":1, "fecha":"2024-03-15", "materia":"Calculo I", "tema":"Limites y continuidad"}]. Texto:\n${text.substring(0, 45000)}`;
         }
 
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.1 }
-            })
+            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }], generationConfig: { temperature: 0.1 } })
         });
-        
+
         const data = await res.json();
-        if(data.error) throw new Error(data.error.message);
-        
+        if (data.error) throw new Error('Gemini: ' + data.error.message);
+        if (!data.candidates || !data.candidates[0]) throw new Error('Gemini no devolvio respuesta.');
+
         let responseText = data.candidates[0].content.parts[0].text;
-        responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsedData = JSON.parse(responseText);
-        
+        // Strip markdown code fences
+        responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        // Extract first JSON structure
+        const jsonMatch = responseText.match(/(\[.*\]|\{.*\})/s);
+        if (!jsonMatch) throw new Error('La IA no devolvio JSON valido. Respuesta: ' + responseText.substring(0, 100));
+        const parsedData = JSON.parse(jsonMatch[0]);
+
         if (type === 'kardex') {
-            for(let item of parsedData) { 
-                const mat = appState.pensumData.pensum.find(m => m.codigo === item.codigo); 
-                if(mat) {
-                    await API.save_progreso(appState.currentCareer, mat.id, item.estado, item.nota, item.periodo);
-                }
+            let count = 0;
+            for (let item of parsedData) {
+                const mat = appState.pensumData.pensum.find(m => m.codigo === item.codigo);
+                if (mat) { await API.save_progreso(appState.currentCareer, mat.id, item.estado, item.nota, item.periodo); count++; }
             }
-            appState.pensumData = await API.get_pensum(appState.currentCareer); 
+            appState.pensumData = await API.get_pensum(appState.currentCareer);
             renderKardex(); actualizarVista();
-            statusText.textContent = `✅ ${parsedData.length} materias importadas`;
+            showStatus(`✅ ${count} materias importadas`, 'text-green-600');
+
         } else if (type === 'horario') {
             await API.save_oferta_bulk(appState.currentCareer, parsedData);
-            document.getElementById('buscar-materia-select')?.scrollIntoView({behavior: 'smooth'});
-            statusText.textContent = `✅ ${parsedData.length} secciones leídas y guardadas.`;
+            showStatus(`✅ ${parsedData.length} secciones guardadas`, 'text-green-600');
+
         } else if (type === 'calendario') {
-            for (let ev of (parsedData.eventos || parsedData)) {
-                await API.save_evento(ev);
+            const items = Array.isArray(parsedData) ? parsedData : (parsedData.eventos || []);
+            for (let ev of items) {
+                if (ev.fecha && ev.titulo) await API.save_evento({ fecha: ev.fecha, titulo: ev.titulo, color: ev.color || '#f59e0b' });
             }
-            await loadEventos(); 
-            renderCalendario();
-            statusText.textContent = "✅ Calendario importado";
-        } else if (type === 'semanas') {
-            await API.save_semanas_bulk(appState.currentCareer, parsedData);
             await loadEventos();
             renderCalendario();
-            loadSemanas();
-            statusText.textContent = `✅ ${parsedData.length} semanas importadas`;
+            showStatus(`✅ ${items.length} eventos importados`, 'text-green-600');
+
+        } else if (type === 'semanas') {
+            const items = Array.isArray(parsedData) ? parsedData : [];
+            await API.save_semanas_bulk(appState.currentCareer, items);
+            await loadEventos();
+            renderCalendario();
+            await loadSemanas();
+            showStatus(`✅ ${items.length} semanas importadas`, 'text-green-600');
         }
-        statusText.classList.remove('animate-pulse','text-purple-600'); statusText.classList.add('text-green-600');
 
     } catch (e) {
-        statusText.textContent = "Fallo: " + e.message;
-        statusText.classList.remove('animate-pulse','text-purple-600'); statusText.classList.add('text-red-600');
-        console.error(e);
+        showStatus('❌ Error: ' + e.message, 'text-red-600');
+        console.error('parsePDF error:', e);
     }
-    document.getElementById('btn-parse-'+type).disabled = false;
+    if (btnEl) btnEl.disabled = false;
 }
+
 
 function checkDisponibilidad(materia, creditosAprobados, materiasAprobadasCodigos) { 
     if (materia.estado === 'Aprobada' || materia.estado === 'En Curso') return materia.estado; 
