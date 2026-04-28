@@ -1,12 +1,14 @@
-const CACHE_NAME = 'ucv-app-v1';
+const CACHE_NAME = 'ucv-app-v2';
 const urlsToCache = [
-  './',
-  './index.html',
-  './app.js',
-  './db.js',
-  './pensums.js',
-  './pdf.min.js',
-  './pdf.worker.min.js'
+  'index.html',
+  'app.js',
+  'db.js',
+  'index.css',
+  'parsers.js',
+  'pensums.js',
+  'pdf.min.js',
+  'pdf.worker.min.js',
+  'manifest.json'
 ];
 
 self.addEventListener('install', event => {
