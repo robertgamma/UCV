@@ -8,7 +8,11 @@
   "theme_color": "#2563eb",
   "icons": [
     {
-  "version": "10.0.0",
+      "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Escudo_de_la_Universidad_Central_de_Venezuela.svg/192px-Escudo_de_la_Universidad_Central_de_Venezuela.svg.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
       "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Escudo_de_la_Universidad_Central_de_Venezuela.svg/512px-Escudo_de_la_Universidad_Central_de_Venezuela.svg.png",
       "sizes": "512x512",
       "type": "image/png"

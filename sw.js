@@ -19,14 +19,13 @@ self.addEventListener('install', event => {
 self.addEventListener('fetch', event => {
   // Ignorar peticiones a APIs externas (como Gemini)
   if (event.request.url.includes('generativelanguage.googleapis.com')) {
-      return fetch(event.request);
+      return; // El navegador manejará esto normalmente si no llamamos a respondWith
   }
   
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        if (response) return response;
-        return fetch(event.request);
+        return response || fetch(event.request);
       })
   );
 });

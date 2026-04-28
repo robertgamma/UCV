@@ -6,6 +6,15 @@
  */
 const APP_VERSION = '10.1.0';
 
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW Registered', reg))
+            .catch(err => console.error('SW Registration Failed', err));
+    });
+}
+
 /* ===================== API OFFLINE NATIVE ===================== */
 const API = {
     async get_pensum(key) {
