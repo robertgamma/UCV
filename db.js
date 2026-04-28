@@ -205,5 +205,21 @@ const API = {
             }
         });
         saveDB(db); return { success: true };
+    },
+    exportDB: () => {
+        return localStorage.getItem(DB_KEY);
+    },
+    importDB: (json) => {
+        try {
+            const data = JSON.parse(json);
+            // Basic validation
+            if (data && data.users) {
+                localStorage.setItem(DB_KEY, json);
+                return { success: true };
+            }
+            return { success: false, error: 'Formato de archivo inválido' };
+        } catch (e) {
+            return { success: false, error: 'Error al procesar el archivo' };
+        }
     }
 };

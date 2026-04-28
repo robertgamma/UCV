@@ -37,7 +37,18 @@ const API = {
     async delete_horario(id) { const db = loadDB(); db.horarios = db.horarios.filter(x => x.id !== id); saveDB(db); },
     async get_evaluaciones() { return loadDB().evaluaciones || []; },
     async save_evaluacion(e) { const db = loadDB(); if (!db.evaluaciones) db.evaluaciones = []; db.evaluaciones.push({ ...e, id: Date.now() }); saveDB(db); },
-    async delete_evaluacion(id) { const db = loadDB(); db.evaluaciones = (db.evaluaciones || []).filter(x => x.id !== id); saveDB(db); }
+    async delete_evaluacion(id) { const db = loadDB(); db.evaluaciones = (db.evaluaciones || []).filter(x => x.id !== id); saveDB(db); },
+    exportDB: () => localStorage.getItem('ucv_db_native'),
+    importDB: (json) => {
+        try {
+            const data = JSON.parse(json);
+            if (data && typeof data === 'object') {
+                localStorage.setItem('ucv_db_native', json);
+                return { success: true };
+            }
+        } catch (e) { return { success: false, error: e.message }; }
+        return { success: false, error: 'Formato inválido' };
+    }
 };
 
 const appState = {
@@ -1344,3 +1355,71 @@ function loadDB() {
     }
 }
 function saveDB(db) { localStorage.setItem('ucv_db_native', JSON.stringify(db)); }
+
+/* ===================== SINCRONIZACIÓN Y RESPALDO ===================== */
+function openBackupModal() {
+    document.getElementById('backup-modal').classList.remove('hidden');
+}
+
+function descargarRespaldo() {
+    const data = API.exportDB();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `ucv_respaldo_${date}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function compartirRespaldo() {
+    const data = API.exportDB();
+    const date = new Date().toISOString().split('T')[0];
+    const fileName = `ucv_respaldo_${date}.json`;
+    
+    if (navigator.share) {
+        try {
+            const file = new File([data], fileName, { type: 'application/json' });
+            await navigator.share({
+                title: 'Respaldo UCV Academic Master',
+                text: 'Aquí tienes mi progreso académico de la UCV.',
+                files: [file]
+            });
+        } catch (err) {
+            console.error("Error al compartir:", err);
+            // Fallback if sharing files is not supported but share text is
+            try {
+                await navigator.share({
+                    title: 'Respaldo UCV Academic Master',
+                    text: 'Datos de respaldo: ' + data
+                });
+            } catch(e2) {
+                alert("Tu navegador no soporta compartir archivos directamente. Descarga el respaldo y envíalo manualmente.");
+            }
+        }
+    } else {
+        alert("La función de compartir no está disponible en este navegador. Usa 'Descargar Respaldo' y envía el archivo manualmente.");
+    }
+}
+
+async function importarRespaldo() {
+    const fileInput = document.getElementById('import-file');
+    if (!fileInput.files.length) return alert("Selecciona un archivo .json primero.");
+    
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const json = e.target.result;
+        const res = API.importDB(json);
+        if (res.success) {
+            alert("¡Sincronización exitosa! La aplicación se reiniciará para cargar los datos.");
+            window.location.reload();
+        } else {
+            alert("Error: " + res.error);
+        }
+    };
+    reader.readAsText(file);
+}
