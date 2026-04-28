@@ -144,6 +144,112 @@ function changeView(v) {
     if (v === 'optimal') renderOptimalPlan();
 }
 
+/* ===================== RUTA ÓPTIMA ===================== */
+function calcularRutaOptima() {
+    const p = appState.pensumData.pensum;
+    // Build a set of approved + en-curso codes
+    const aprobadas = new Set(p.filter(m => m.estado === 'Aprobada').map(m => m.codigo));
+    const counts = {};
+
+    // Compute "unlock weight": how many future subjects each materia unlocks (transitively)
+    function unlockWeight(codigo, visited = new Set()) {
+        if (visited.has(codigo)) return 0;
+        visited.add(codigo);
+        return p
+            .filter(m => Array.isArray(m.prelaciones) && m.prelaciones.includes(codigo))
+            .reduce((acc, m) => acc + 1 + unlockWeight(m.codigo, new Set(visited)), 0);
+    }
+
+    const pendientes = p
+        .filter(m => m.estado !== 'Aprobada')
+        .map(m => ({
+            ...m,
+            desbloqueada: Array.isArray(m.prelaciones)
+                ? m.prelaciones.every(pr => typeof pr === 'number' ? true : aprobadas.has(pr))
+                : true,
+            peso: unlockWeight(m.codigo)
+        }));
+
+    const semestres = [];
+    const codigosAprobados = new Set(aprobadas);
+
+    // Simulate semester-by-semester planning
+    let intentos = 0;
+    while (pendientes.filter(m => !semestres.flat().includes(m.codigo)).length > 0 && intentos++ < 30) {
+        const yaPlaneadas = new Set(semestres.flat());
+        const disponibles = pendientes.filter(m =>
+            !yaPlaneadas.has(m.codigo) &&
+            (Array.isArray(m.prelaciones)
+                ? m.prelaciones.every(pr => typeof pr === 'number' ? true : codigosAprobados.has(pr))
+                : true)
+        );
+        if (!disponibles.length) break;
+
+        // Sort by original semester then by unlock weight desc
+        disponibles.sort((a, b) => a.semestre - b.semestre || b.peso - a.peso);
+
+        // Take up to 5 subjects per simulated semester (reasonable load)
+        const bloque = disponibles.slice(0, 5).map(m => m.codigo);
+        if (!bloque.length) break;
+        semestres.push(bloque);
+        bloque.forEach(c => codigosAprobados.add(c));
+    }
+
+    return semestres.map((bloque, i) => ({
+        num: i + 1,
+        materias: bloque.map(c => pendientes.find(m => m.codigo === c)).filter(Boolean)
+    }));
+}
+
+function renderOptimalPlan() {
+    const container = document.getElementById('optimal-plan-results');
+    if (!container || !appState.pensumData) return;
+    const plan = calcularRutaOptima();
+
+    if (!plan.length) {
+        container.innerHTML = `
+            <div class="text-center py-12">
+                <i class="fas fa-graduation-cap text-4xl text-emerald-400 mb-4 block"></i>
+                <p class="font-black text-xl text-emerald-400">¡Carrera completada!</p>
+                <p class="text-slate-500 text-sm mt-2">No quedan materias por cursar.</p>
+            </div>`;
+        return;
+    }
+
+    const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
+    container.innerHTML = plan.map((sem, idx) => {
+        const totalUC = sem.materias.reduce((a, m) => a + (m.creditos || 0), 0);
+        const color = COLORS[idx % COLORS.length];
+        const isCurrent = sem.materias.some(m => m.estado === 'En Curso');
+        return `
+        <div class="glass-card overflow-hidden border ${isCurrent ? 'border-amber-500/40' : 'border-white/5'}">
+            <div class="px-5 py-3 flex justify-between items-center border-b border-slate-700/50"
+                 style="background: ${color}18;">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-bolt" style="color:${color}"></i>
+                    <span class="font-black text-slate-200">Semestre sugerido ${sem.num}</span>
+                    ${isCurrent ? '<span class="text-[10px] font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">En Curso</span>' : ''}
+                </div>
+                <span class="text-xs font-black" style="color:${color}">${totalUC} UC</span>
+            </div>
+            <div class="p-4 flex flex-wrap gap-2">
+                ${sem.materias.map(m => {
+            const isCur = m.estado === 'En Curso';
+            return `<button onclick="openMateriaModal(${m.id})"
+                        class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105
+                               ${isCur
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'}">
+                        <span>${m.nombre}</span>
+                        <span class="ml-1 opacity-60">${m.creditos}UC</span>
+                    </button>`;
+        }).join('')}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+
 /* ===================== PROGRESO & MAPA ===================== */
 function renderizarSemestres() {
     const container = document.getElementById('semestres');
@@ -734,51 +840,244 @@ async function borrarEvaluacion(id) {
 /* ===================== CALENDARIO ===================== */
 async function loadEventos() { appState.eventos = await API.get_eventos(); }
 function cambiarMes(o) { appState.currentDate.setMonth(appState.currentDate.getMonth() + o); renderCalendario(); }
+
+// Returns ISO date string YYYY-MM-DD from a Date object
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+// All days between fecha and fecha_fin inclusive
+function datesInRange(fecha, fecha_fin) {
+    const out = [];
+    const d = new Date(fecha + 'T00:00:00');
+    const end = new Date((fecha_fin || fecha) + 'T00:00:00');
+    while (d <= end) { out.push(isoDate(d)); d.setDate(d.getDate() + 1); }
+    return out;
+}
+
 function renderCalendario() {
     const grid = document.getElementById('calendario-grid');
     if (!grid) return;
-    const y = appState.currentDate.getFullYear(), m = appState.currentDate.getMonth();
+    const y = appState.currentDate.getFullYear();
+    const m = appState.currentDate.getMonth();
     const md = document.getElementById('mes-anio-display');
     if (md) md.textContent = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(appState.currentDate);
-    grid.innerHTML = '';
-    const firstDay = new Date(y, m, 1).getDay(); // 0=Sunday
-    for (let i = 0; i < firstDay; i++) grid.innerHTML += '<div class="h-20 bg-slate-900/30 rounded"></div>';
-    const today = new Date().toISOString().slice(0, 10);
-    for (let d = 1; d <= new Date(y, m + 1, 0).getDate(); d++) {
-        const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const evs = appState.eventos.filter(e => e.fecha === ds);
-        const isToday = ds === today;
-        grid.innerHTML += `
-            <div class="h-20 p-1 border-t border-slate-700/50 relative ${isToday ? 'bg-blue-500/10 border-blue-500/40' : ''}">
-                <span class="text-[10px] font-bold ${isToday ? 'text-blue-400 bg-blue-500/20 px-1 rounded' : 'text-slate-500'}">${d}</span>
+
+    const today = isoDate(new Date());
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const firstDow = new Date(y, m, 1).getDay(); // 0=Sun
+
+    // Group events: spanning (fecha_fin set & different day) vs single-day
+    const evs = appState.eventos || [];
+    const fmt = (ds) => `${y}-${String(m + 1).padStart(2, '0')}`;
+
+    // Build week rows — each row = 7 days (Sun–Sat)
+    // Pad with nulls for days before/after month
+    const cells = []; // array of YYYY-MM-DD | null
+    for (let i = 0; i < firstDow; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+        cells.push(`${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    }
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+    // Build the grid HTML — 8 columns: [week-label] [Sun] [Mon] [Tue] [Wed] [Thu] [Fri] [Sat]
+    let html = '';
+
+    weeks.forEach((week, wi) => {
+        // Week label: range of real days in this row
+        const realDays = week.filter(Boolean);
+        let weekLabel = '';
+        let weekEvts = [];
+        if (realDays.length) {
+            const d1 = new Date(realDays[0] + 'T00:00:00');
+            const d2 = new Date(realDays[realDays.length - 1] + 'T00:00:00');
+            const fmtShort = dd => dd.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+            weekLabel = `${fmtShort(d1)} – ${fmtShort(d2)}`;
+
+            // Spanning events that cover this week (any overlap with realDays)
+            weekEvts = evs.filter(e => {
+                if (!e.fecha_fin || e.fecha_fin === e.fecha) return false;
+                const range = datesInRange(e.fecha, e.fecha_fin);
+                return range.some(ds => realDays.includes(ds));
+            });
+        }
+
+        // WEEK LABEL CELL (rowspan visual via CSS)
+        html += `
+        <div class="flex col-span-1 items-start pt-2 px-1 bg-slate-900/40 border-r border-slate-700/60 min-h-[5rem]">
+            <div class="w-full">
+                <p class="text-[9px] font-black text-slate-500 uppercase leading-tight">${weekLabel}</p>
+                ${weekEvts.map(e => `
+                    <div class="mt-1 w-full truncate text-[8px] font-bold px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 flex items-center justify-between"
+                         style="background:${e.color || '#3b82f6'}22;color:${e.color || '#60a5fa'};border-left:3px solid ${e.color || '#3b82f6'}"
+                         onclick="abrirModalEvento(null,'${e.fecha}','${e.fecha_fin || e.fecha}','${(e.titulo || '').replace(/'/g, '&#39;')}','${e.id}')">
+                        ${e.titulo}
+                        <span onclick="event.stopPropagation();borrarEvento(${e.id})" class="ml-1 opacity-50 hover:opacity-100">×</span>
+                    </div>`).join('')}
+                <button onclick="abrirModalEvento(null,'${realDays[0] || ''}','${realDays[realDays.length - 1] || realDays[0] || ''}')"
+                    class="mt-1 text-[8px] text-slate-700 hover:text-blue-400 transition-all w-full text-left">+ semana</button>
+            </div>
+        </div>`;
+
+        // 7 day cells
+        week.forEach(ds => {
+            if (!ds) {
+                html += `<div class="min-h-[5rem] bg-slate-950/20"></div>`;
+                return;
+            }
+            const dayEvts = evs.filter(e => {
+                // single-day or partial events that touch this day
+                if (e.fecha_fin && e.fecha_fin !== e.fecha) return false; // spanning shown in week label
+                return e.fecha === ds;
+            });
+            const isToday = ds === today;
+            const d = parseInt(ds.split('-')[2]);
+            html += `
+            <div class="min-h-[5rem] p-1 border-t border-slate-800/60 cursor-pointer hover:bg-white/3 transition-all relative group ${isToday ? 'bg-blue-500/10 border-blue-500/30' : ''}"
+                 onclick="abrirModalEvento('${ds}')">
+                <div class="flex justify-between items-start">
+                    <span class="text-[10px] font-bold ${isToday ? 'text-blue-400 bg-blue-500/20 px-1 rounded' : 'text-slate-500'}">${d}</span>
+                    <span class="text-[8px] text-slate-700 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-all">+</span>
+                </div>
                 <div class="space-y-0.5 mt-1">
-                    ${evs.map(e => `<div class="text-[8px] px-1 py-0.5 rounded truncate font-bold" style="background:${e.color || '#3b82f6'}33;color:${e.color || '#60a5fa'}">${e.titulo}</div>`).join('')}
+                    ${dayEvts.map(e => `
+                        <div class="text-[8px] px-1 py-0.5 rounded truncate font-bold flex items-center justify-between"
+                             style="background:${e.color || '#3b82f6'}33;color:${e.color || '#60a5fa'}">
+                            <span class="truncate">${e.titulo}</span>
+                            <span onclick="event.stopPropagation();borrarEvento(${e.id})" class="ml-0.5 opacity-40 hover:opacity-100 shrink-0 cursor-pointer">×</span>
+                        </div>`).join('')}
                 </div>
             </div>`;
-    }
+        });
+    });
+
+    grid.innerHTML = html;
     renderProximosEventos();
+}
+
+function abrirModalEvento(fechaDia, fechaIni, fechaFin, tituloExistente, idExistente) {
+    const existing = document.getElementById('modal-evento-cal');
+    if (existing) existing.remove();
+
+    // Determine defaults
+    const hoy = isoDate(new Date());
+    const defIni = fechaDia || fechaIni || hoy;
+    const defFin = fechaDia ? fechaDia : (fechaFin || defIni);
+    const esEdicion = !!idExistente;
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-evento-cal';
+    modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="glass-card p-7 w-full max-w-sm" onclick="event.stopPropagation()">
+            <h3 class="font-black text-lg mb-5">
+                <i class="fas fa-calendar-plus text-amber-400 mr-2"></i>
+                ${esEdicion ? 'Editar evento' : (fechaDia ? 'Nuevo evento' : 'Nuevo evento de semana')}
+            </h3>
+            <div class="space-y-3">
+                <input type="text" id="modal-ev-titulo" class="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl font-bold text-sm"
+                    placeholder="Nombre del evento" value="${tituloExistente || ''}">
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase">Inicio</label>
+                        <input type="date" id="modal-ev-ini" class="w-full mt-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-sm" value="${defIni}">
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase">Fin (opcional)</label>
+                        <input type="date" id="modal-ev-fin" class="w-full mt-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-sm" value="${defFin}">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Color</label>
+                    <div id="modal-ev-colors" class="flex gap-2 flex-wrap">
+                        ${['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'].map(c =>
+        `<button onclick="selectEventColor('${c}',this)"
+                                class="w-6 h-6 rounded-full border-2 border-transparent hover:scale-110 transition-all"
+                                style="background:${c}" data-color="${c}"></button>`).join('')}
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="document.getElementById('modal-evento-cal').remove()"
+                    class="w-1/2 py-3 glass-card font-bold text-sm">Cancelar</button>
+                <button onclick="guardarEvento(${idExistente || 'null'})"
+                    class="w-1/2 py-3 bg-amber-600 hover:bg-amber-500 font-black rounded-xl text-white transition-all">
+                    ${esEdicion ? 'Actualizar' : 'Guardar'}
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    // Select first color by default
+    document.querySelector('#modal-ev-colors button').click();
+    document.getElementById('modal-ev-titulo').focus();
+}
+
+let _selectedEventColor = '#f59e0b';
+function selectEventColor(color, btn) {
+    _selectedEventColor = color;
+    document.querySelectorAll('#modal-ev-colors button').forEach(b => b.style.borderColor = 'transparent');
+    if (btn) btn.style.borderColor = '#fff';
+}
+
+async function guardarEvento(idExistente) {
+    const titulo = document.getElementById('modal-ev-titulo').value.trim();
+    const fecha = document.getElementById('modal-ev-ini').value;
+    const fecha_fin = document.getElementById('modal-ev-fin').value || fecha;
+    if (!titulo || !fecha) return alert('Completa el nombre y la fecha.');
+
+    const db = loadDB();
+    if (idExistente) {
+        const ev = (db.eventos || []).find(e => e.id == idExistente);
+        if (ev) { ev.titulo = titulo; ev.fecha = fecha; ev.fecha_fin = fecha_fin; ev.color = _selectedEventColor; saveDB(db); }
+    } else {
+        if (!db.eventos) db.eventos = [];
+        db.eventos.push({ id: Date.now(), titulo, fecha, fecha_fin, color: _selectedEventColor });
+        saveDB(db);
+    }
+    document.getElementById('modal-evento-cal').remove();
+    await loadEventos();
+    renderCalendario();
+}
+
+async function borrarEvento(id) {
+    const db = loadDB();
+    db.eventos = (db.eventos || []).filter(e => e.id != id);
+    saveDB(db);
+    await loadEventos();
+    renderCalendario();
 }
 
 function renderProximosEventos() {
     const el = document.getElementById('proximos-eventos');
     if (!el) return;
-    const hoy = new Date().toISOString().slice(0, 10);
-    const proximos = appState.eventos
-        .filter(e => e.fecha >= hoy)
+    const hoy = isoDate(new Date());
+    const proximos = (appState.eventos || [])
+        .filter(e => (e.fecha_fin || e.fecha) >= hoy)
         .sort((a, b) => a.fecha.localeCompare(b.fecha))
-        .slice(0, 5);
-    if (!proximos.length) { el.innerHTML = '<span class="text-slate-600">Sin próximos eventos</span>'; return; }
+        .slice(0, 6);
+    if (!proximos.length) { el.innerHTML = '<span class="text-slate-600 text-xs">Sin próximos eventos</span>'; return; }
     el.innerHTML = proximos.map(e => {
         const fecha = new Date(e.fecha + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-        return `<div class="flex items-start gap-2 p-2 rounded-lg bg-white/5">
-            <div class="w-8 h-8 rounded-lg flex flex-col items-center justify-center text-center shrink-0" style="background:${e.color || '#3b82f6'}33;color:${e.color || '#60a5fa'}">
+        const esRango = e.fecha_fin && e.fecha_fin !== e.fecha;
+        const fechaFin = esRango ? new Date(e.fecha_fin + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : null;
+        return `<div class="flex items-start gap-2 p-2 rounded-lg bg-white/5 cursor-pointer hover:bg-white/10 transition-all"
+                     onclick="abrirModalEvento(null,'${e.fecha}','${e.fecha_fin || e.fecha}','${(e.titulo || '').replace(/'/g, '&#39;')}','${e.id}')">
+            <div class="w-8 h-8 rounded-lg flex flex-col items-center justify-center text-center shrink-0"
+                 style="background:${e.color || '#3b82f6'}33;color:${e.color || '#60a5fa'}">
                 <span class="text-[8px] font-black leading-tight">${fecha.split(' ')[0]}</span>
                 <span class="text-[7px] uppercase">${fecha.split(' ')[1] || ''}</span>
             </div>
-            <span class="text-[10px] text-slate-300 font-bold leading-tight mt-1">${e.titulo}</span>
+            <div class="flex-1 min-w-0">
+                <p class="text-[10px] text-slate-300 font-bold leading-tight mt-1 truncate">${e.titulo}</p>
+                ${esRango ? `<p class="text-[8px] text-slate-600">${fecha} – ${fechaFin}</p>` : ''}
+            </div>
+            <button onclick="event.stopPropagation();borrarEvento(${e.id})" class="text-slate-700 hover:text-red-400 text-xs shrink-0 mt-1">×</button>
         </div>`;
     }).join('');
 }
+
 
 /* ===================== PD TAB ===================== */
 // mwikicpd.ing.ucv.ve URL maps by career key

@@ -307,16 +307,22 @@
                     </div>
                     <div class="lg:col-span-3">
                         <div class="glass-card p-6">
-                            <div class="flex justify-between items-center mb-6">
+                            <div class="flex justify-between items-center mb-4">
                                 <h2 id="mes-anio-display" class="text-2xl font-black capitalize"></h2>
-                                <div class="flex gap-2">
+                                <div class="flex gap-2 items-center">
+                                    <button onclick="abrirModalEvento(null)"
+                                        class="px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 font-bold text-xs rounded-xl border border-amber-500/30 transition-all">
+                                        <i class="fas fa-plus mr-1"></i>Evento
+                                    </button>
                                     <button onclick="cambiarMes(-1)" class="p-2 glass-card hover:bg-white/10"><i
                                             class="fas fa-chevron-left"></i></button>
                                     <button onclick="cambiarMes(1)" class="p-2 glass-card hover:bg-white/10"><i
                                             class="fas fa-chevron-right"></i></button>
                                 </div>
                             </div>
-                            <div class="grid grid-cols-7 gap-1 mb-2">
+                            <!-- 8-col header: Semana + 7 days -->
+                            <div class="grid gap-0 mb-1" style="grid-template-columns: 90px repeat(7, 1fr)">
+                                <div class="text-[9px] font-black text-slate-600 uppercase py-1 px-1">Semana</div>
                                 <div class="text-center text-[10px] font-black text-slate-500 py-1">DOM</div>
                                 <div class="text-center text-[10px] font-black text-slate-500 py-1">LUN</div>
                                 <div class="text-center text-[10px] font-black text-slate-500 py-1">MAR</div>
@@ -326,7 +332,8 @@
                                 <div class="text-center text-[10px] font-black text-slate-500 py-1">SÁB</div>
                             </div>
                             <div id="calendario-grid"
-                                class="grid grid-cols-7 gap-1 bg-slate-800/20 rounded-xl overflow-hidden border border-slate-700">
+                                class="rounded-xl overflow-hidden border border-slate-700 bg-slate-800/10"
+                                style="display:grid;grid-template-columns: 90px repeat(7, 1fr)">
                             </div>
                         </div>
                     </div>
